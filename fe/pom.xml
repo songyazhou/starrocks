@@ -100,7 +100,7 @@ under the License.
                 <repository>
                     <id>central</id>
                     <name>central maven repo https</name>
-                    <url>https://repo.maven.apache.org/maven2</url>
+                    <url>https://maven.aliyun.com/repository/central</url>
                 </repository>
 
                 <!-- for java-cup -->
@@ -122,7 +122,7 @@ under the License.
             <pluginRepositories>
                 <pluginRepository>
                     <id>spring-plugins</id>
-                    <url>https://repo.spring.io/plugins-release/</url>
+                    <url>https://maven.aliyun.com/repository/spring-plugin/</url>
                 </pluginRepository>
                 <!-- for cup-maven-plugin -->
                 <pluginRepository>

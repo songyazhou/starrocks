@@ -25,6 +25,7 @@ import com.starrocks.common.ThreadPoolManager;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.ConnectScheduler;
 import com.starrocks.server.GlobalStateMgr;
+import com.starrocks.service.FrontendOptions;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -66,7 +67,7 @@ public class MysqlServer {
         // open server socket
         try {
             serverChannel = ServerSocketChannel.open();
-            serverChannel.socket().bind(new InetSocketAddress("0.0.0.0", port), 2048);
+            serverChannel.socket().bind(new InetSocketAddress(FrontendOptions.getLocalHost(), port), 2048);
             serverChannel.configureBlocking(true);
         } catch (IOException e) {
             LOG.warn("Open MySQL network service failed.", e);

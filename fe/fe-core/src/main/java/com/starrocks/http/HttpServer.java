@@ -73,6 +73,7 @@ import com.starrocks.http.rest.TableRowCountAction;
 import com.starrocks.http.rest.TableSchemaAction;
 import com.starrocks.http.rest.TransactionLoadAction;
 import com.starrocks.master.MetaHelper;
+import com.starrocks.service.FrontendOptions;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
@@ -235,7 +236,7 @@ public class HttpServer {
                 serverBootstrap.group(bossGroup, workerGroup)
                         .channel(NioServerSocketChannel.class)
                         .childHandler(new StarrocksHttpServerInitializer());
-                Channel ch = serverBootstrap.bind(port).sync().channel();
+                Channel ch = serverBootstrap.bind(FrontendOptions.getLocalHost(), port).sync().channel();
 
                 isStarted.set(true);
                 LOG.info("HttpServer started with port {}", port);

@@ -24,6 +24,7 @@ import com.starrocks.common.Config;
 import com.starrocks.common.ThreadPoolManager;
 import com.starrocks.mysql.MysqlServer;
 import com.starrocks.qe.ConnectScheduler;
+import com.starrocks.service.FrontendOptions;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.xnio.OptionMap;
@@ -68,7 +69,7 @@ public class NMysqlServer extends MysqlServer {
     @Override
     public boolean start() {
         try {
-            server = xnioWorker.createStreamConnectionServer(new InetSocketAddress(port),
+            server = xnioWorker.createStreamConnectionServer(new InetSocketAddress(FrontendOptions.getLocalHost(), port),
                     acceptListener,
                     OptionMap.create(Options.TCP_NODELAY, true, Options.BACKLOG, Config.mysql_nio_backlog_num));
             server.resumeAccepts();

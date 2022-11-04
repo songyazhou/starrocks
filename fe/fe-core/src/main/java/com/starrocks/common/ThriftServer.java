@@ -18,6 +18,7 @@
 package com.starrocks.common;
 
 import com.google.common.collect.Sets;
+import com.starrocks.service.FrontendOptions;
 import com.starrocks.thrift.TNetworkAddress;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -88,16 +89,17 @@ public class ThriftServer {
     }
 
     private void createSimpleServer() throws TTransportException {
-        TServer.Args args = new TServer.Args(new TServerSocket(port)).protocolFactory(
-                new TBinaryProtocol.Factory()).processor(processor);
+        TServer.Args args = new TServer.Args(
+                new TServerSocket(new InetSocketAddress(FrontendOptions.getLocalHost(), port))
+        ).protocolFactory(new TBinaryProtocol.Factory()).processor(processor);
         server = new TSimpleServer(args);
     }
 
     private void createThreadedServer() throws TTransportException {
         TThreadedSelectorServer.Args args =
-                new TThreadedSelectorServer.Args(new TNonblockingServerSocket(port, Config.thrift_client_timeout_ms))
-                        .protocolFactory(
-                                new TBinaryProtocol.Factory()).processor(processor);
+                new TThreadedSelectorServer.Args(new TNonblockingServerSocket(
+                        new InetSocketAddress(FrontendOptions.getLocalHost(), port), Config.thrift_client_timeout_ms)
+                ).protocolFactory(new TBinaryProtocol.Factory()).processor(processor);
         ThreadPoolExecutor threadPoolExecutor = ThreadPoolManager
                 .newDaemonCacheThreadPool(Config.thrift_server_max_worker_threads, "thrift-server-pool", true);
         args.executorService(threadPoolExecutor);
@@ -106,7 +108,7 @@ public class ThriftServer {
 
     private void createThreadPoolServer() throws TTransportException {
         TServerSocket.ServerSocketTransportArgs socketTransportArgs = new TServerSocket.ServerSocketTransportArgs()
-                .bindAddr(new InetSocketAddress(port))
+                .bindAddr(new InetSocketAddress(FrontendOptions.getLocalHost(), port))
                 .clientTimeout(Config.thrift_client_timeout_ms)
                 .backlog(Config.thrift_backlog_num);
 

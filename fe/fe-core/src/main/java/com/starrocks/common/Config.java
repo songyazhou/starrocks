@@ -424,7 +424,7 @@ public class Config extends ConfigBase {
      * CAN NOT set this as a hostname, only IP.
      */
     @ConfField
-    public static String frontend_address = "0.0.0.0";
+    public static String frontend_address = "127.0.0.1";
 
     /**
      * Declare a selection strategy for those servers have many ips.
