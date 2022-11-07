@@ -20,11 +20,14 @@
 // under the License.
 
 #include "service/brpc_service.h"
+#include "service/backend_options.h"
 
 #include <cstring>
 
 #include "common/config.h"
 #include "common/logging.h"
+
+#include "service/backend_options.h"
 
 namespace brpc {
 
@@ -53,7 +56,13 @@ Status BRpcService::start(int port, google::protobuf::Service* service, google::
         options.num_threads = config::brpc_num_threads;
     }
 
-    if (_server->Start(port, &options) != 0) {
+    butil::ip_t ip;
+    const char* ip_str = BackendOptions::get_port_bind_ip().c_str();
+    if (butil::str2ip(ip_str, &ip) != 0 && butil::hostname2ip(ip_str, &ip) != 0) {
+        PLOG(ERROR) << "Invalid address=`" << ip_str << '\'';
+        return Status::InternalError("failed");
+    }
+    if (_server->Start(butil::EndPoint(ip, port), &options) != 0) {
         PLOG(WARNING) << "Fail to start brpc server on port " << port;
         return Status::InternalError("Start brpc service failed");
     }

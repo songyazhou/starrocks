@@ -30,7 +30,8 @@ class BackendOptions {
 public:
     static bool init();
     static std::string get_localhost();
-
+    static std::string get_port_bind_ip();
+    
 private:
     static bool analyze_priority_cidrs();
     static bool is_in_prior_network(const std::string& ip);

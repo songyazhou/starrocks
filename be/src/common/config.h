@@ -40,7 +40,7 @@ CONF_Int32(brpc_num_threads, "-1");
 // Note that there should at most one ip match this list.
 // this is a list in semicolon-delimited format, in CIDR notation, e.g. 10.10.10.0/24
 // If no ip match this rule, will choose one randomly.
-CONF_String(priority_networks, "");
+CONF_String(priority_networks, "127.0.0.1");
 
 ////
 //// tcmalloc gc parameter

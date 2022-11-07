@@ -236,7 +236,7 @@ public class HttpServer {
                 serverBootstrap.group(bossGroup, workerGroup)
                         .channel(NioServerSocketChannel.class)
                         .childHandler(new StarrocksHttpServerInitializer());
-                Channel ch = serverBootstrap.bind(FrontendOptions.getLocalHost(), port).sync().channel();
+                Channel ch = serverBootstrap.bind(FrontendOptions.getPortBindIp(), port).sync().channel();
 
                 isStarted.set(true);
                 LOG.info("HttpServer started with port {}", port);

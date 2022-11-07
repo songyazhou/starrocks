@@ -67,7 +67,7 @@ public class MysqlServer {
         // open server socket
         try {
             serverChannel = ServerSocketChannel.open();
-            serverChannel.socket().bind(new InetSocketAddress(FrontendOptions.getLocalHost(), port), 2048);
+            serverChannel.socket().bind(new InetSocketAddress(FrontendOptions.getPortBindIp(), port), 2048);
             serverChannel.configureBlocking(true);
         } catch (IOException e) {
             LOG.warn("Open MySQL network service failed.", e);

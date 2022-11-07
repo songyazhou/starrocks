@@ -102,6 +102,13 @@ public class FrontendOptions {
         return localAddr;
     }
 
+    public static String getPortBindIp() {
+        if (localAddr.isLoopbackAddress()) {
+            return "127.0.0.1";
+        }
+        return "0.0.0.0";
+    }
+
     public static String getLocalHostAddress() {
         return localAddr.getHostAddress();
     }

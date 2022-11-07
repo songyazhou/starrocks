@@ -81,6 +81,13 @@ std::string BackendOptions::get_localhost() {
     return _s_localhost;
 }
 
+std::string BackendOptions::get_port_bind_ip() {
+    if (BackendOptions::_s_localhost == "127.0.0.1") {
+        return BackendOptions::_s_localhost;
+    }
+    return "0.0.0.0";
+}
+
 bool BackendOptions::analyze_priority_cidrs() {
     if (config::priority_networks == "") {
         return true;

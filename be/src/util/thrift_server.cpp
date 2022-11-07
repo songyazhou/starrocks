@@ -40,6 +40,8 @@
 
 #include "util/thread.h"
 
+#include "service/backend_options.h"
+
 namespace starrocks {
 
 // Helper class that starts a server in a separate thread, and handles
@@ -329,14 +331,14 @@ Status ThriftServer::start() {
         }
 
         std::shared_ptr<apache::thrift::transport::TNonblockingServerSocket> port(
-                new apache::thrift::transport::TNonblockingServerSocket(_port));
+                new apache::thrift::transport::TNonblockingServerSocket(BackendOptions::get_port_bind_ip(), _port));
         _server = std::make_unique<apache::thrift::server::TNonblockingServer>(
                 _processor, transport_factory, transport_factory, protocol_factory, protocol_factory, port, thread_mgr);
         break;
     }
 
     case THREAD_POOL:
-        fe_server_transport.reset(new apache::thrift::transport::TServerSocket(_port));
+        fe_server_transport.reset(new apache::thrift::transport::TServerSocket(BackendOptions::get_port_bind_ip(), _port));
 
         if (transport_factory == nullptr) {
             transport_factory.reset(new apache::thrift::transport::TBufferedTransportFactory());
@@ -347,7 +349,7 @@ Status ThriftServer::start() {
         break;
 
     case THREADED:
-        server_socket = new apache::thrift::transport::TServerSocket(_port);
+        server_socket = new apache::thrift::transport::TServerSocket(BackendOptions::get_port_bind_ip(), _port);
         //      server_socket->setAcceptTimeout(500);
         fe_server_transport.reset(server_socket);
 

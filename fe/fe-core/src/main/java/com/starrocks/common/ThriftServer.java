@@ -90,7 +90,7 @@ public class ThriftServer {
 
     private void createSimpleServer() throws TTransportException {
         TServer.Args args = new TServer.Args(
-                new TServerSocket(new InetSocketAddress(FrontendOptions.getLocalHost(), port))
+                new TServerSocket(new InetSocketAddress(FrontendOptions.getPortBindIp(), port))
         ).protocolFactory(new TBinaryProtocol.Factory()).processor(processor);
         server = new TSimpleServer(args);
     }
@@ -98,7 +98,7 @@ public class ThriftServer {
     private void createThreadedServer() throws TTransportException {
         TThreadedSelectorServer.Args args =
                 new TThreadedSelectorServer.Args(new TNonblockingServerSocket(
-                        new InetSocketAddress(FrontendOptions.getLocalHost(), port), Config.thrift_client_timeout_ms)
+                        new InetSocketAddress(FrontendOptions.getPortBindIp(), port), Config.thrift_client_timeout_ms)
                 ).protocolFactory(new TBinaryProtocol.Factory()).processor(processor);
         ThreadPoolExecutor threadPoolExecutor = ThreadPoolManager
                 .newDaemonCacheThreadPool(Config.thrift_server_max_worker_threads, "thrift-server-pool", true);
@@ -108,7 +108,7 @@ public class ThriftServer {
 
     private void createThreadPoolServer() throws TTransportException {
         TServerSocket.ServerSocketTransportArgs socketTransportArgs = new TServerSocket.ServerSocketTransportArgs()
-                .bindAddr(new InetSocketAddress(FrontendOptions.getLocalHost(), port))
+                .bindAddr(new InetSocketAddress(FrontendOptions.getPortBindIp(), port))
                 .clientTimeout(Config.thrift_client_timeout_ms)
                 .backlog(Config.thrift_backlog_num);
 

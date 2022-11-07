@@ -38,6 +38,7 @@
 #include "http/http_headers.h"
 #include "http/http_request.h"
 #include "service/brpc.h"
+#include "service/backend_options.h"
 #include "util/debug_util.h"
 #include "util/errno.h"
 #include "util/thread.h"
@@ -77,7 +78,7 @@ static int on_connection(struct evhttp_request* req, void* param) {
 }
 
 EvHttpServer::EvHttpServer(int port, int num_workers)
-        : _host("0.0.0.0"), _port(port), _num_workers(num_workers), _real_port(0) {
+        : _host(BackendOptions::get_port_bind_ip()), _port(port), _num_workers(num_workers), _real_port(0) {
     DCHECK_GT(_num_workers, 0);
     auto res = pthread_rwlock_init(&_rw_lock, nullptr);
     DCHECK_EQ(res, 0);
