@@ -20,7 +20,6 @@
 // under the License.
 
 #include "service/brpc_service.h"
-#include "service/backend_options.h"
 
 #include <cstring>
 
