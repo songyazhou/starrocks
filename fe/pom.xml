@@ -122,7 +122,7 @@ under the License.
             <pluginRepositories>
                 <pluginRepository>
                     <id>spring-plugins</id>
-                    <url>https://maven.aliyun.com/repository/spring-plugin/</url>
+                    <url>https://repo.spring.io/plugins-release/</url>
                 </pluginRepository>
                 <!-- for cup-maven-plugin -->
                 <pluginRepository>
