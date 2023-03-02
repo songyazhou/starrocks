@@ -146,7 +146,7 @@ Status DistinctStreamingNode::get_next(RuntimeState* state, ChunkPtr* chunk, boo
                     }
 
                     COUNTER_SET(_aggregator->hash_table_size(), (int64_t)_aggregator->hash_set_variant().size());
-                    if ((*chunk)->num_rows() > 0) {
+                    if ((*chunk) != nullptr && (*chunk)->num_rows() > 0) {
                         break;
                     } else {
                         continue;
@@ -207,14 +207,10 @@ void DistinctStreamingNode::_output_chunk_from_hash_set(ChunkPtr* chunk) {
     }
 }
 
-std::vector<std::shared_ptr<pipeline::OperatorFactory> > DistinctStreamingNode::decompose_to_pipeline(
-        pipeline::PipelineBuilderContext* context) {
+pipeline::OpFactories DistinctStreamingNode::decompose_to_pipeline(pipeline::PipelineBuilderContext* context) {
     using namespace pipeline;
+
     OpFactories operators_with_sink = _children[0]->decompose_to_pipeline(context);
-    // We cannot get degree of parallelism from PipelineBuilderContext, of which is only a suggest value
-    // and we may set other parallelism for source operator in many special cases
-    size_t degree_of_parallelism =
-            down_cast<SourceOperatorFactory*>(operators_with_sink[0].get())->degree_of_parallelism();
 
     // Create a shared RefCountedRuntimeFilterCollector
     auto&& rc_rf_probe_collector = std::make_shared<RcRfProbeCollector>(2, std::move(this->runtime_filter_collector()));
@@ -235,7 +231,8 @@ std::vector<std::shared_ptr<pipeline::OperatorFactory> > DistinctStreamingNode::
     this->init_runtime_filter_for_operator(source_operator.get(), context, rc_rf_probe_collector);
     // Aggregator must be used by a pair of sink and source operators,
     // so operators_with_source's degree of parallelism must be equal with operators_with_sink's
-    source_operator->set_degree_of_parallelism(degree_of_parallelism);
+    auto* upstream_source_op = context->source_operator(operators_with_sink);
+    context->inherit_upstream_source_properties(source_operator.get(), upstream_source_op);
     operators_with_source.push_back(std::move(source_operator));
     if (limit() != -1) {
         operators_with_source.emplace_back(

@@ -1,20 +1,20 @@
 # DROP ROLE
 
-## description
+## Description
 
 This statement allows users to delete a role.
 
-Syntax:
+## Syntax
 
 ```sql
-DROP ROLE role1;
+DROP ROLE <role_name>
 ```
 
  Deleting a role does not affect permissions of users who previously belonged to this role. It only decouples the role from the user without changing permissions that user has already obtained from the role.
 
-## example
+## Examples
 
-1. Drop a role
+Drop a role.
 
   ```sql
   DROP ROLE role1;

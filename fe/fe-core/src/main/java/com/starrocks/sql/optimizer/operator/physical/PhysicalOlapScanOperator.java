@@ -5,12 +5,10 @@ package com.starrocks.sql.optimizer.operator.physical;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.starrocks.catalog.Column;
-import com.starrocks.catalog.OlapTable;
 import com.starrocks.catalog.Table;
 import com.starrocks.common.Pair;
 import com.starrocks.sql.optimizer.OptExpression;
 import com.starrocks.sql.optimizer.OptExpressionVisitor;
-import com.starrocks.sql.optimizer.Utils;
 import com.starrocks.sql.optimizer.base.DistributionSpec;
 import com.starrocks.sql.optimizer.base.HashDistributionDesc;
 import com.starrocks.sql.optimizer.base.HashDistributionSpec;
@@ -24,6 +22,7 @@ import com.starrocks.sql.optimizer.statistics.ColumnDict;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 public class PhysicalOlapScanOperator extends PhysicalScanOperator {
@@ -116,10 +115,6 @@ public class PhysicalOlapScanOperator extends PhysicalScanOperator {
         this.outputColumns = outputColumns;
     }
 
-    public boolean canDoReplicatedJoin() {
-        return Utils.canDoReplicatedJoin((OlapTable) table, selectedIndexId, selectedPartitionId, selectedTabletId);
-    }
-
     @Override
     public String toString() {
         return "PhysicalOlapScan" + " {" +
@@ -136,6 +131,30 @@ public class PhysicalOlapScanOperator extends PhysicalScanOperator {
     @Override
     public <R, C> R accept(OptExpressionVisitor<R, C> visitor, OptExpression optExpression, C context) {
         return visitor.visitPhysicalOlapScan(optExpression, context);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), selectedIndexId, selectedPartitionId,
+                selectedTabletId);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        PhysicalOlapScanOperator that = (PhysicalOlapScanOperator) o;
+        return selectedIndexId == that.selectedIndexId &&
+                Objects.equals(hashDistributionSpec, that.hashDistributionSpec) &&
+                Objects.equals(selectedPartitionId, that.selectedPartitionId) &&
+                Objects.equals(selectedTabletId, that.selectedTabletId);
     }
 
     public HashDistributionSpec getDistributionSpec() {

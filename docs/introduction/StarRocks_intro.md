@@ -47,7 +47,7 @@ Join our [Slack channel](https://join.slack.com/t/starrocks/shared_invite/zt-z5z
 - [Continuously load data from Apache Kafka®](../loading/RoutineLoad.md)
 - [Bulk load using Apache Spark™](../loading/SparkLoad.md)
 - [Load data using INSERT](../loading/InsertInto.md)
-- [Realtime synchronization from MySQL](../loading/Flink_cdc_load.md)
+- [Synchronize data from MySQL in real time](../loading/Flink_cdc_load.md)
 - [Continuously load data from Apache Flink®](../loading/Flink-connector-starrocks.md)
 
 </NavBoxPartItem>
@@ -74,12 +74,12 @@ Join our [Slack channel](https://join.slack.com/t/starrocks/shared_invite/zt-z5z
 <NavBoxPart>
 <NavBoxPartItem title="Query external data sources​">
 
-- [Apache Hive™](../using_starrocks/Manage_data.md)
-- [Apache Hudi](../using_starrocks/External_table.md#hudi-external-table)
-- [Apache Iceberg](../using_starrocks/External_table.md#apache-iceberg-external-table)
-- [MySQL](../using_starrocks/External_table.md#mysql-external-table)
-- [Elasticsearch](../using_starrocks/External_table.md#elasticsearch-external-table)
-- [JDBC-compatible database](../using_starrocks/External_table.md#external-table-for-a-jdbc-compatible-database)
+- [Apache Hive™](../data_source/Manage_data.md)
+- [Apache Hudi](../data_source/External_table.md#hudi-external-table)
+- [Apache Iceberg](../data_source/External_table.md#apache-iceberg-external-table)
+- [MySQL](../data_source/External_table.md#mysql-external-table)
+- [Elasticsearch](../data_source/External_table.md#elasticsearch-external-table)
+- [JDBC-compatible database](../data_source/External_table.md#external-table-for-a-jdbc-compatible-database)
 
 </NavBoxPartItem>
 </NavBoxPart>
@@ -92,7 +92,7 @@ Join our [Slack channel](https://join.slack.com/t/starrocks/shared_invite/zt-z5z
 - [Manage a cluster](../administration/Cluster_administration.md)
 - [Scale in and out a cluster](../administration/Scale_up_down.md)
 - [Tune query performance](../administration/Query_planning.md)
-- [Manage workloads](../administration//resource_group.md)
+- [Manage workloads](../administration/resource_group.md)
 
 </NavBoxPartItem>
 </NavBoxPart>

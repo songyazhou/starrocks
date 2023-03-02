@@ -1,6 +1,6 @@
 # RECOVER
 
-## description
+## Description
 
 This statement is used to recover deleted database, table or partition.
 
@@ -9,19 +9,19 @@ Syntax:
 1. Recover database
 
     ```sql
-    RECOVER DATABASE db_name;
+    RECOVER DATABASE <db_name>
     ```
 
 2. Recover database
 
     ```sql
-    RECOVER TABLE [db_name.]table_name;
+    RECOVER TABLE [<db_name>.]<table_name>
     ```
 
 3. Recover partition
 
     ```sql
-    RECOVER PARTITION partition_name FROM [db_name.]table_name;
+    RECOVER PARTITION partition_name FROM [<db_name>.]<table_name>
     ```
 
 Note：
@@ -29,7 +29,7 @@ Note：
 1. It can only recover meta-information deleted some time ago. The default time: one day. (You can change it through parameter configuration catalog_trash_expire_second in fe.conf. )
 2. If the meta-information is deleted with an identical meta-information created, the previous one will not be recovered.
 
-## example
+## Examples
 
 1. Recover database named example_db
 

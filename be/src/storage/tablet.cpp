@@ -29,6 +29,7 @@
 #include <memory>
 #include <utility>
 
+#include "exec/vectorized/schema_scanner/schema_be_tablets_scanner.h"
 #include "runtime/current_thread.h"
 #include "runtime/exec_env.h"
 #include "storage/compaction_candidate.h"
@@ -390,9 +391,8 @@ void Tablet::delete_expired_inc_rowsets() {
 }
 
 void Tablet::delete_expired_stale_rowset() {
-    int64_t now = UnixSeconds();
-    // Compute the end time to delete rowsets, when a expired rowset createtime less then this time, it will be deleted.
-    int64_t expired_stale_sweep_endtime = now - config::tablet_rowset_stale_sweep_time_sec;
+    // Compute the end time to delete rowsets, when an expired rowset createtime older then this time, it will be deleted.
+    int64_t expired_stale_sweep_endtime = UnixSeconds() - config::tablet_rowset_stale_sweep_time_sec;
 
     if (_updates) {
         _updates->remove_expired_versions(expired_stale_sweep_endtime);
@@ -1364,6 +1364,26 @@ void Tablet::reset_compaction(CompactionType type) {
 // for ut
 void Tablet::set_compaction_context(std::unique_ptr<CompactionContext>& compaction_context) {
     _compaction_context = std::move(compaction_context);
+}
+
+void Tablet::get_basic_info(TabletBasicInfo& info) {
+    std::shared_lock rdlock(_meta_lock);
+    info.table_id = _tablet_meta->table_id();
+    info.partition_id = _tablet_meta->partition_id();
+    info.tablet_id = _tablet_meta->tablet_id();
+    info.create_time = _tablet_meta->creation_time();
+    info.state = _state;
+    info.type = keys_type();
+    if (_updates != nullptr) {
+        _updates->get_basic_info_extra(info);
+    } else {
+        info.num_version = _tablet_meta->version_count();
+        info.max_version = _tablet_meta->max_version().second;
+        info.min_version = 1;
+        info.num_rowset = _tablet_meta->version_count();
+        info.num_row = _tablet_meta->num_rows();
+        info.data_size = _tablet_meta->tablet_footprint();
+    }
 }
 
 } // namespace starrocks

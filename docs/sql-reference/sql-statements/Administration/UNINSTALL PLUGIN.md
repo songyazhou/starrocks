@@ -1,20 +1,20 @@
 # UNINTALL PLUGIN
 
-## description
+## Description
 
 This statement is used to uninstall a plugin.
 
 Syntax:
 
 ```SQL
-UNINSTALL PLUGIN plugin_name;
+UNINSTALL PLUGIN <plugin_name>
 ```
 
 plugin_name can be viewed through SHOW PLUGINS command
 
 Only non-builtin plugins can be uninstalled.
 
-## example
+## Examples
 
 1. Uninstall a plugin:
 

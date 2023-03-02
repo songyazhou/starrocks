@@ -430,6 +430,8 @@ struct OlapReaderStatistics {
     int64_t branchless_cond_evaluate_ns = 0;
     int64_t expr_cond_evaluate_ns = 0;
 
+    int64_t get_rowsets_ns = 0;
+    int64_t get_delvec_ns = 0;
     int64_t segment_init_ns = 0;
     int64_t segment_create_chunk_ns = 0;
 
@@ -496,6 +498,8 @@ struct RowsetId {
             return {buf, 48};
         }
     }
+
+    int64_t id() { return hi & LOW_56_BITS; }
 
     // std::unordered_map need this api
     bool operator==(const RowsetId& rhs) const { return hi == rhs.hi && mi == rhs.mi && lo == rhs.lo; }

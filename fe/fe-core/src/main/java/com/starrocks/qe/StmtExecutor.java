@@ -113,6 +113,7 @@ import com.starrocks.thrift.TDescriptorTable;
 import com.starrocks.thrift.TQueryOptions;
 import com.starrocks.thrift.TQueryType;
 import com.starrocks.thrift.TUniqueId;
+import com.starrocks.thrift.TWorkGroup;
 import com.starrocks.transaction.TabletCommitInfo;
 import com.starrocks.transaction.TransactionCommitFailedException;
 import com.starrocks.transaction.TransactionState;
@@ -225,10 +226,12 @@ public class StmtExecutor {
         context.getPlannerProfile().build(plannerProfile);
 
         if (coord != null) {
-            coord.getQueryProfile().getCounterTotalTime().setValue(TimeUtils.getEstimatedTime(beginTimeInNanoSecond));
-            coord.endProfile();
-            coord.mergeIsomorphicProfiles();
-            profile.addChild(coord.getQueryProfile());
+            if (coord.getQueryProfile() != null) {
+                coord.getQueryProfile().getCounterTotalTime().setValue(TimeUtils.getEstimatedTime(beginTimeInNanoSecond));
+                coord.endProfile();
+                coord.mergeIsomorphicProfiles();
+                profile.addChild(coord.getQueryProfile());
+            }
             coord = null;
         }
     }
@@ -479,8 +482,9 @@ public class StmtExecutor {
             context.getState().setError(e.getMessage());
             throw e;
         } catch (UserException e) {
+            String sql = originStmt != null ? originStmt.originStmt : "";
             // analysis exception only print message, not print the stack
-            LOG.info("execute Exception. {}", e.getMessage());
+            LOG.info("execute Exception, sql: {}, error: {}", sql, e.getMessage());
             context.getState().setError(e.getMessage());
             context.getState().setErrType(QueryState.ErrType.ANALYSIS_ERR);
         } catch (Throwable e) {
@@ -971,7 +975,7 @@ public class StmtExecutor {
         String explainString = "";
         if (parsedStmt.getExplainLevel() == StatementBase.ExplainLevel.VERBOSE) {
             if (context.getSessionVariable().isEnableResourceGroup()) {
-                WorkGroup workGroup = Coordinator.prepareWorkGroup(context);
+                TWorkGroup workGroup = Coordinator.prepareWorkGroup(context);
                 String workGroupStr = workGroup != null ? workGroup.getName() : WorkGroup.DEFAULT_WORKGROUP_NAME;
                 explainString += "RESOURCE GROUP: " + workGroupStr + "\n\n";
             }

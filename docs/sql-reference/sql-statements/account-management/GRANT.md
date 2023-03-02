@@ -8,9 +8,9 @@ You can use the GRANT statement to grant specific privileges to a user or a role
 
 - Grant specific privileges on a database and a table to a user or a role. If the role that is granted these privileges does not exist, the system automatically creates the role when you execute this statement.
 
-```SQL
-GRANT privilege_list ON db_name[.tbl_name] TO {user_identity | ROLE 'role_name'}；
-```
+    ```SQL
+    GRANT privilege_list ON db_name[.tbl_name] TO {user_identity | ROLE 'role_name'}
+    ```
 
 - Grant specific privileges on a resource to a user or a role. If the role that is granted these privileges does not exist, the system automatically creates the role when you execute this statement.
 
@@ -44,7 +44,7 @@ The preceding privileges can be classified into the following three categories:
 
 The database and table. This parameter supports the following three formats:
 
-- `*.*`: indicates all databases and tables.
+- `*.*`: indicates all databases and tables. If this format is specified, the global privilege is granted.
 - `db.*`: indicates a specific database and all tables in this database.
 - `db.tbl`: indicates a specific table in a specific database.
 

@@ -77,11 +77,31 @@ StarRocks is compatible with SQL-92.
   +-------+----------+
   | sr_id | name     |
   +-------+----------+
-  |     1 | tom |
+  |     1 | tom      |
   |     3 | maruko   |
   |     2 | johndoe  |
   +-------+----------+
   3 rows in set (0.01 sec)
+  ```
+
+- Run a query on a specified partition.
+
+  ```SQL
+  SELECT sr_id, name 
+  FROM sr_member 
+  PARTITION (p2);
+  ```
+
+  The returned results are as follows:
+
+  ```Plain
+  +-------+---------+
+  | sr_id | name    |
+  +-------+---------+
+  |     3 | maruko  |
+  |     2 | johndoe |
+  +-------+---------+
+  2 rows in set (0.01 sec)
   ```
 
 ## What to do next
@@ -91,5 +111,5 @@ To learn more about the data ingestion methods of StarRocks, see [Ingestion Over
 You can also learn how to:
 
 - Perform [ETL when loading](../loading/Etl_in_loading.md).
-- Create an [external table](../using_starrocks/External_table.md) to access external data sources.
+- Create an [external table](../data_source/External_table.md) to access external data sources.
 - [Analyze the query plan](../administration/Query_planning.md) to learn how to optimize the query performance.

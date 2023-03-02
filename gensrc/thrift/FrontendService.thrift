@@ -45,9 +45,9 @@ struct TSetSessionParams {
 struct TAuthenticateParams {
     1: required string user
     2: required string passwd
-    3: required string host
-    4: required string db_name
-    5: required list<string> table_names;
+    3: optional string host
+    4: optional string db_name
+    5: optional list<string> table_names;
 }
 
 struct TColumnDesc {
@@ -464,6 +464,7 @@ struct TMasterOpRequest {
     14: optional Types.TUserIdentity current_user_ident
     15: optional i32 stmtIdx  // the idx of the sql in multi statements
     16: optional InternalService.TQueryOptions query_options
+    17: optional string catalog
 
     // Following is added by StarRocks
     // TODO(zc): Should forward all session variables and connection context

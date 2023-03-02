@@ -75,6 +75,8 @@ public:
     static StatusOr<TabletSharedPtr> get_tablet(const TInternalScanRange* scan_range);
     static int compute_priority(int32_t num_submitted_tasks);
 
+    const std::vector<ExprContext*>& bucket_exprs() const { return _bucket_exprs; }
+
 private:
     friend class TabletScanner;
 
@@ -174,6 +176,8 @@ private:
     // the row sets into _tablet_rowsets in the preparation phase to avoid the row sets being deleted.
     std::vector<std::vector<RowsetSharedPtr>> _tablet_rowsets;
 
+    std::vector<ExprContext*> _bucket_exprs;
+
     // profile
     RuntimeProfile* _scan_profile = nullptr;
 
@@ -191,6 +195,8 @@ private:
     RuntimeProfile::Counter* _del_vec_filter_counter = nullptr;
     RuntimeProfile::Counter* _pred_filter_timer = nullptr;
     RuntimeProfile::Counter* _chunk_copy_timer = nullptr;
+    RuntimeProfile::Counter* _get_rowsets_timer = nullptr;
+    RuntimeProfile::Counter* _get_delvec_timer = nullptr;
     RuntimeProfile::Counter* _seg_init_timer = nullptr;
     RuntimeProfile::Counter* _seg_zm_filtered_counter = nullptr;
     RuntimeProfile::Counter* _zm_filtered_counter = nullptr;

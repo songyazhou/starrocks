@@ -54,7 +54,6 @@
 #include "runtime/stream_load/load_stream_mgr.h"
 #include "runtime/stream_load/stream_load_executor.h"
 #include "runtime/stream_load/transaction_mgr.h"
-#include "runtime/thread_resource_mgr.h"
 #include "storage/page_cache.h"
 #include "storage/storage_engine.h"
 #include "storage/tablet_schema_map.h"
@@ -130,7 +129,6 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _backend_client_cache = new BackendServiceClientCache(config::max_client_cache_size_per_host);
     _frontend_client_cache = new FrontendServiceClientCache(config::max_client_cache_size_per_host);
     _broker_client_cache = new BrokerServiceClientCache(config::max_client_cache_size_per_host);
-    _thread_mgr = new ThreadResourceMgr();
     // query_context_mgr keeps slotted map with 64 slot to reduce contention
     _query_context_mgr = new pipeline::QueryContextManager(6);
     RETURN_IF_ERROR(_query_context_mgr->init());
@@ -213,27 +211,28 @@ Status ExecEnv::_init(const std::vector<StorePath>& store_paths) {
     _frontend_client_cache->init_metrics(StarRocksMetrics::instance()->metrics(), "frontend");
     _broker_client_cache->init_metrics(StarRocksMetrics::instance()->metrics(), "broker");
     _result_mgr->init();
+
+    int num_io_threads = config::pipeline_scan_thread_pool_thread_num <= 0
+                                 ? std::thread::hardware_concurrency()
+                                 : config::pipeline_scan_thread_pool_thread_num;
+
+    _pipeline_scan_io_thread_pool =
+            new PriorityThreadPool("pip_scan_io", // pipeline scan io
+                                   num_io_threads, config::pipeline_scan_thread_pool_queue_size);
+    std::unique_ptr<ThreadPool> scan_worker_thread_pool;
+    RETURN_IF_ERROR(ThreadPoolBuilder("scan_executor") // scan io task executor
+                            .set_min_threads(0)
+                            .set_max_threads(num_io_threads)
+                            .set_max_queue_size(1000)
+                            .set_idle_timeout(MonoDelta::FromMilliseconds(2000))
+                            .build(&scan_worker_thread_pool));
+    _scan_executor = new workgroup::ScanExecutor(std::move(scan_worker_thread_pool),
+                                                 std::make_unique<workgroup::WorkGroupScanTaskQueue>(
+                                                         workgroup::WorkGroupScanTaskQueue::SchedEntityType::OLAP));
+    _scan_executor->initialize(num_io_threads);
+
     // it means acting as compute node while store_path is empty. some threads are not needed for that case.
     if (!store_paths.empty()) {
-        int num_io_threads = config::pipeline_scan_thread_pool_thread_num <= 0
-                                     ? std::thread::hardware_concurrency()
-                                     : config::pipeline_scan_thread_pool_thread_num;
-
-        _pipeline_scan_io_thread_pool =
-                new PriorityThreadPool("pip_scan_io", // pipeline scan io
-                                       num_io_threads, config::pipeline_scan_thread_pool_queue_size);
-        std::unique_ptr<ThreadPool> scan_worker_thread_pool;
-        RETURN_IF_ERROR(ThreadPoolBuilder("scan_executor") // scan io task executor
-                                .set_min_threads(0)
-                                .set_max_threads(num_io_threads)
-                                .set_max_queue_size(1000)
-                                .set_idle_timeout(MonoDelta::FromMilliseconds(2000))
-                                .build(&scan_worker_thread_pool));
-        _scan_executor = new workgroup::ScanExecutor(std::move(scan_worker_thread_pool),
-                                                     std::make_unique<workgroup::WorkGroupScanTaskQueue>(
-                                                             workgroup::WorkGroupScanTaskQueue::SchedEntityType::OLAP));
-        _scan_executor->initialize(num_io_threads);
-
         Status status = _load_path_mgr->init();
         if (!status.ok()) {
             LOG(ERROR) << "load path mgr init failed." << status.get_error_msg();
@@ -437,10 +436,6 @@ void ExecEnv::_destroy() {
     if (_thread_pool) {
         delete _thread_pool;
         _thread_pool = nullptr;
-    }
-    if (_thread_mgr) {
-        delete _thread_mgr;
-        _thread_mgr = nullptr;
     }
     if (_consistency_mem_tracker) {
         delete _consistency_mem_tracker;

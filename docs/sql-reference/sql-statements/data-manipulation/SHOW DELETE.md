@@ -1,18 +1,18 @@
 # SHOW DELETE
 
-## description
+## Description
 
 This statement is used to show the history of successful delete tasks
 
-Syntax：
+## Syntax
 
 ```sql
-SHOW DELETE [FROM db_name]
+SHOW DELETE [FROM <db_name>]
 ```
 
-## example
+## Examples
 
-1. Show all historical delete tasks of database
+Show all historical delete tasks of `database`.
 
 ```sql
 SHOW DELETE FROM database;

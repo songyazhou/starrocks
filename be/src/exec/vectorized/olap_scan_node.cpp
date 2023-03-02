@@ -46,6 +46,14 @@ Status OlapScanNode::init(const TPlanNode& tnode, RuntimeState* state) {
         _unused_output_columns.emplace_back(col_name);
     }
 
+    if (_olap_scan_node.__isset.bucket_exprs) {
+        const auto& bucket_exprs = _olap_scan_node.bucket_exprs;
+        _bucket_exprs.resize(bucket_exprs.size());
+        for (int i = 0; i < bucket_exprs.size(); ++i) {
+            RETURN_IF_ERROR(Expr::create_expr_tree(_pool, bucket_exprs[i], &_bucket_exprs[i]));
+        }
+    }
+
     _estimate_scan_and_output_row_bytes();
 
     return Status::OK();
@@ -197,6 +205,10 @@ Status OlapScanNode::close(RuntimeState* state) {
     if (runtime_state() != nullptr) {
         // Reduce the memory usage if the the average string size is greater than 512.
         release_large_columns<BinaryColumn>(runtime_state()->chunk_size() * 512);
+    }
+
+    for (const auto& rowsets_per_tablet : _tablet_rowsets) {
+        Rowset::release_readers(rowsets_per_tablet);
     }
 
     return ScanNode::close(state);
@@ -470,6 +482,9 @@ void OlapScanNode::_init_counter(RuntimeState* state) {
     _cached_pages_num_counter = ADD_COUNTER(_scan_profile, "CachedPagesNum", TUnit::UNIT);
     _pushdown_predicates_counter = ADD_COUNTER(_scan_profile, "PushdownPredicates", TUnit::UNIT);
 
+    _get_rowsets_timer = ADD_TIMER(_scan_profile, "GetRowsets");
+    _get_delvec_timer = ADD_TIMER(_scan_profile, "GetDelVec");
+
     /// SegmentInit
     _seg_init_timer = ADD_TIMER(_scan_profile, "SegmentInit");
     _bi_filter_timer = ADD_CHILD_TIMER(_scan_profile, "BitmapIndexFilter", "SegmentInit");
@@ -667,6 +682,7 @@ Status OlapScanNode::_capture_tablet_rowsets() {
         {
             std::shared_lock l(tablet->get_header_lock());
             RETURN_IF_ERROR(tablet->capture_consistent_rowsets(Version(0, version), &_tablet_rowsets[i]));
+            Rowset::acquire_readers(_tablet_rowsets[i]);
         }
     }
 

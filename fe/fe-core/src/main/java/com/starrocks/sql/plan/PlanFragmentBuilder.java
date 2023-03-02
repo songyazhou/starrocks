@@ -23,6 +23,7 @@ import com.starrocks.catalog.FunctionSet;
 import com.starrocks.catalog.JDBCTable;
 import com.starrocks.catalog.KeysType;
 import com.starrocks.catalog.MaterializedIndex;
+import com.starrocks.catalog.MaterializedIndexMeta;
 import com.starrocks.catalog.MysqlTable;
 import com.starrocks.catalog.OlapTable;
 import com.starrocks.catalog.Partition;
@@ -284,7 +285,8 @@ public class PlanFragmentBuilder {
             // Key columns and value columns cannot be pruned in the non-skip-aggr scan stage.
             // - All the keys columns must be retained to merge and aggregate rows.
             // - Value columns can only be used after merging and aggregating.
-            if (referenceTable.getKeysType().isAggregationFamily() && !node.isPreAggregation()) {
+            MaterializedIndexMeta materializedIndexMeta = referenceTable.getIndexMetaByIndexId(node.getSelectedIndexId());
+            if (materializedIndexMeta.getKeysType().isAggregationFamily() && !node.isPreAggregation()) {
                 return;
             }
 
@@ -304,9 +306,9 @@ public class PlanFragmentBuilder {
             Set<Integer> singlePredColumnIds = new HashSet<Integer>();
             Set<Integer> complexPredColumnIds = new HashSet<Integer>();
             Set<String> aggAndPrimaryKeyTableValueColumnNames = new HashSet<String>();
-            if (referenceTable.getKeysType().isAggregationFamily() ||
-                    referenceTable.getKeysType() == KeysType.PRIMARY_KEYS) {
-                List<Column> fullColumn = referenceTable.getFullSchema();
+            if (materializedIndexMeta.getKeysType().isAggregationFamily() ||
+                    materializedIndexMeta.getKeysType() == KeysType.PRIMARY_KEYS) {
+                List<Column> fullColumn = materializedIndexMeta.getSchema();
                 for (Column col : fullColumn) {
                     if (!col.isKey()) {
                         aggAndPrimaryKeyTableValueColumnNames.add(col.getName());
@@ -549,31 +551,31 @@ public class PlanFragmentBuilder {
                 long totalTabletsNum = 0;
                 // Compatible with old tablet selected, copy from "OlapScanNode::computeTabletInfo"
                 // we can remove code when refactor tablet select
-                for (Long partitionId : node.getSelectedPartitionId()) {
+                long localBeId = -1;
+                if (Config.enable_local_replica_selection) {
+                    localBeId = GlobalStateMgr.getCurrentSystemInfo()
+                            .getBackendIdByHost(FrontendOptions.getLocalHostAddress());
+                }
+
+                List<Long> selectedNonEmptyPartitionIds = node.getSelectedPartitionId().stream().filter(p -> {
+                    List<Long> selectTabletIds = scanNode.getPartitionToScanTabletMap().get(p);
+                    return selectTabletIds != null && !selectTabletIds.isEmpty();
+                }).collect(Collectors.toList());
+                scanNode.setSelectedPartitionIds(selectedNonEmptyPartitionIds);
+                for (Long partitionId : scanNode.getSelectedPartitionIds()) {
+                    List<Long> selectTabletIds = scanNode.getPartitionToScanTabletMap().get(partitionId);
+                    Preconditions.checkState(selectTabletIds != null && !selectTabletIds.isEmpty());
                     final Partition partition = referenceTable.getPartition(partitionId);
                     final MaterializedIndex selectedTable = partition.getIndex(selectedIndexId);
-
-                    final List<Tablet> tablets = Lists.newArrayList();
-                    for (Long id : node.getSelectedTabletId()) {
-                        if (selectedTable.getTablet(id) != null) {
-                            tablets.add(selectedTable.getTablet(id));
-                        }
-                    }
-
-                    long localBeId = -1;
-                    if (Config.enable_local_replica_selection) {
-                        localBeId = GlobalStateMgr.getCurrentSystemInfo()
-                                .getBackendIdByHost(FrontendOptions.getLocalHostAddress());
-                    }
-
                     List<Long> allTabletIds = selectedTable.getTabletIdsInOrder();
                     Map<Long, Integer> tabletId2BucketSeq = Maps.newHashMap();
                     for (int i = 0; i < allTabletIds.size(); i++) {
                         tabletId2BucketSeq.put(allTabletIds.get(i), i);
                     }
-
                     totalTabletsNum += selectedTable.getTablets().size();
                     scanNode.setTabletId2BucketSeq(tabletId2BucketSeq);
+                    List<Tablet> tablets =
+                            selectTabletIds.stream().map(selectedTable::getTablet).collect(Collectors.toList());
                     scanNode.addScanRangeLocations(partition, selectedTable, tablets, localBeId);
                 }
                 scanNode.setTotalTabletsNum(totalTabletsNum);
@@ -621,6 +623,18 @@ public class PlanFragmentBuilder {
             scanNode.setDictStringIdToIntIds(node.getDictStringIdToIntIds());
             scanNode.updateAppliedDictStringColumns(node.getGlobalDicts().stream().
                     map(entry -> entry.first).collect(Collectors.toSet()));
+
+            List<ColumnRefOperator> bucketColumns = getShuffleColumns(node.getDistributionSpec());
+            boolean useAllBucketColumns =
+                    bucketColumns.stream().allMatch(c -> node.getColRefToColumnMetaMap().containsKey(c));
+            if (useAllBucketColumns) {
+                List<Expr> bucketExprs = bucketColumns.stream()
+                        .map(e -> ScalarOperatorToExpr.buildExecExpression(e,
+                                new ScalarOperatorToExpr.FormatterContext(context.getColRefToExpr())))
+                        .collect(Collectors.toList());
+                scanNode.setBucketExprs(bucketExprs);
+                scanNode.setBucketColumns(bucketColumns);
+            }
 
             context.getScanNodes().add(scanNode);
             PlanFragment fragment =
@@ -929,12 +943,31 @@ public class PlanFragmentBuilder {
                                 case "TABLE_NAME":
                                     scanNode.setSchemaTable(constantOperator.getVarchar());
                                     break;
+                                case "BE_ID":
+                                    scanNode.setBeId(constantOperator.getBigint());
+                                    break;
+                                case "TABLE_ID":
+                                    scanNode.setTableId(constantOperator.getBigint());
+                                    break;
+                                case "PARTITION_ID":
+                                    scanNode.setPartitionId(constantOperator.getBigint());
+                                    break;
+                                case "TABLET_ID":
+                                    scanNode.setTabletId(constantOperator.getBigint());
+                                    break;
+                                case "TXN_ID":
+                                    scanNode.setTxnId(constantOperator.getBigint());
+                                    break;
                                 default:
                                     break;
                             }
                         }
                     }
                 }
+            }
+
+            if (scanNode.isBeSchemaTable()) {
+                scanNode.computeBeScanRanges();
             }
 
             context.getScanNodes().add(scanNode);
@@ -1281,6 +1314,10 @@ public class PlanFragmentBuilder {
                         new AggregationNode(context.getNextNodeId(), inputFragment.getPlanRoot(), aggInfo);
                 aggregationNode.unsetNeedsFinalize();
                 aggregationNode.setIntermediateTuple();
+
+                if (hasColocateOlapScanChildInFragment(aggregationNode)) {
+                    aggregationNode.setColocate(true);
+                }
             } else if (node.getType().isDistinctLocal()) {
                 // For SQL: select count(distinct id_bigint), sum(id_int) from test_basic;
                 // count function is update function, but sum is merge function
@@ -1310,12 +1347,49 @@ public class PlanFragmentBuilder {
             aggregationNode.computeStatistics(optExpr.getStatistics());
 
             // One phase aggregation prefer the inter-instance parallel to avoid local shuffle
-            if (node.isOnePhaseAgg() && hasNoExchangeNodes(inputFragment.getPlanRoot())) {
+            if ((node.isOnePhaseAgg() || node.isMergedLocalAgg() || node.getType().isDistinctGlobal())
+                    && hasNoExchangeNodes(inputFragment.getPlanRoot())) {
+                if (optExpr.getLogicalProperty().isExecuteInOneTablet()) {
+                    clearOlapScanNodePartitions(aggregationNode);
+                }
                 estimateDopOfOnePhaseAgg(inputFragment);
             }
 
             inputFragment.setPlanRoot(aggregationNode);
             return inputFragment;
+        }
+
+        /**
+         * Clear partitionExprs of OlapScanNode (the bucket keys to pass to BE).
+         * <p>
+         * When partitionExprs of OlapScanNode are passed to BE, the post operators will use them as
+         * local shuffle partition exprs.
+         * Otherwise, the operators will use the original partition exprs (group by keys or join on keys).
+         * <p>
+         * The bucket keys can satisfy the required hash property of blocking aggregation except two scenarios:
+         * - OlapScanNode only has one tablet after pruned.
+         * - It is executed on the single BE.
+         * As for these two scenarios, which will generate ScanNode(k1)->LocalShuffle(c1)->BlockingAgg(c1),
+         * partitionExprs of OlapScanNode must be cleared to make BE use group by keys not bucket keys as
+         * local shuffle partition exprs.
+         *
+         * @param root The root node of the fragment which need to check whether to clear bucket keys of OlapScanNode.
+         */
+        private void clearOlapScanNodePartitions(PlanNode root) {
+            if (root instanceof OlapScanNode) {
+                OlapScanNode scanNode = (OlapScanNode) root;
+                scanNode.setBucketExprs(Lists.newArrayList());
+                scanNode.setBucketColumns(Lists.newArrayList());
+                return;
+            }
+
+            if (root instanceof ExchangeNode) {
+                return;
+            }
+
+            for (PlanNode child : root.getChildren()) {
+                clearOlapScanNodePartitions(child);
+            }
         }
 
         // Check whether colocate Table exists in the same Fragment
@@ -1394,14 +1468,8 @@ public class PlanFragmentBuilder {
                 dataPartition = DataPartition.UNPARTITIONED;
             } else if (DistributionSpec.DistributionType.SHUFFLE.equals(distribution.getDistributionSpec().getType())) {
                 exchangeNode.setNumInstances(inputFragment.getPlanRoot().getNumInstances());
-                List<Integer> columnRefSet =
-                        ((HashDistributionSpec) distribution.getDistributionSpec()).getHashDistributionDesc()
-                                .getColumns();
-                Preconditions.checkState(!columnRefSet.isEmpty());
-                List<ColumnRefOperator> partitionColumns = new ArrayList<>();
-                for (int columnId : columnRefSet) {
-                    partitionColumns.add(columnRefFactory.getColumnRef(columnId));
-                }
+                List<ColumnRefOperator> partitionColumns =
+                        getShuffleColumns((HashDistributionSpec) distribution.getDistributionSpec());
                 List<Expr> distributeExpressions =
                         partitionColumns.stream().map(e -> ScalarOperatorToExpr.buildExecExpression(e,
                                         new ScalarOperatorToExpr.FormatterContext(context.getColRefToExpr())))
@@ -1650,6 +1718,44 @@ public class PlanFragmentBuilder {
             return planFragment;
         }
 
+        private void setNullableForJoin(JoinOperator joinOperator,
+                PlanFragment leftFragment, PlanFragment rightFragment, ExecPlan context) {
+            Set<TupleId> nullableTupleIds = new HashSet<>();
+            nullableTupleIds.addAll(leftFragment.getPlanRoot().getNullableTupleIds());
+            nullableTupleIds.addAll(rightFragment.getPlanRoot().getNullableTupleIds());
+            if (joinOperator.isLeftOuterJoin()) {
+                nullableTupleIds.addAll(rightFragment.getPlanRoot().getTupleIds());
+            } else if (joinOperator.isRightOuterJoin()) {
+                nullableTupleIds.addAll(leftFragment.getPlanRoot().getTupleIds());
+            } else if (joinOperator.isFullOuterJoin()) {
+                nullableTupleIds.addAll(leftFragment.getPlanRoot().getTupleIds());
+                nullableTupleIds.addAll(rightFragment.getPlanRoot().getTupleIds());
+            }
+            for (TupleId tupleId : nullableTupleIds) {
+                TupleDescriptor tupleDescriptor = context.getDescTbl().getTupleDesc(tupleId);
+                tupleDescriptor.getSlots().forEach(slot -> slot.setIsNullable(true));
+                tupleDescriptor.computeMemLayout();
+            }
+        }
+
+        private List<ColumnRefOperator> getShuffleColumns(HashDistributionSpec spec) {
+            List<Integer> columnRefs = spec.getShuffleColumns();
+            Preconditions.checkState(!columnRefs.isEmpty());
+
+            List<ColumnRefOperator> shuffleColumns = new ArrayList<>();
+            for (int columnId : columnRefs) {
+                shuffleColumns.add(columnRefFactory.getColumnRef(columnId));
+            }
+            return shuffleColumns;
+        }
+
+        private List<Expr> getShuffleExprs(HashDistributionSpec hashDistributionSpec, ExecPlan context) {
+            List<ColumnRefOperator> shuffleColumns = getShuffleColumns(hashDistributionSpec);
+            return shuffleColumns.stream().map(e -> ScalarOperatorToExpr.buildExecExpression(e,
+                            new ScalarOperatorToExpr.FormatterContext(context.getColRefToExpr())))
+                    .collect(Collectors.toList());
+        }
+
         private PlanFragment visitPhysicalJoin(OptExpression optExpr, ExecPlan context) {
             PlanFragment leftFragment = visit(optExpr.inputAt(0), context);
             PlanFragment rightFragment = visit(optExpr.inputAt(1), context);
@@ -1741,7 +1847,7 @@ public class PlanFragmentBuilder {
                     } else if (isShuffleJoin(optExpr)) {
                         distributionMode = JoinNode.DistributionMode.SHUFFLE_HASH_BUCKET;
                     } else {
-                        Preconditions.checkState(false, "Must be replicate join or colocate join");
+                        Preconditions.checkState(false, "Must be colocate/bucket/replicate join");
                         distributionMode = JoinNode.DistributionMode.COLOCATE;
                     }
                 } else if (isShuffleJoin(optExpr)) {
@@ -1780,22 +1886,7 @@ public class PlanFragmentBuilder {
                                 new ScalarOperatorToExpr.FormatterContext(context.getColRefToExpr())))
                         .collect(Collectors.toList());
 
-                if (joinOperator.isLeftOuterJoin()) {
-                    for (TupleId tupleId : rightFragment.getPlanRoot().getTupleIds()) {
-                        context.getDescTbl().getTupleDesc(tupleId).getSlots().forEach(slot -> slot.setIsNullable(true));
-                    }
-                } else if (joinOperator.isRightOuterJoin()) {
-                    for (TupleId tupleId : leftFragment.getPlanRoot().getTupleIds()) {
-                        context.getDescTbl().getTupleDesc(tupleId).getSlots().forEach(slot -> slot.setIsNullable(true));
-                    }
-                } else if (joinOperator.isFullOuterJoin()) {
-                    for (TupleId tupleId : leftFragment.getPlanRoot().getTupleIds()) {
-                        context.getDescTbl().getTupleDesc(tupleId).getSlots().forEach(slot -> slot.setIsNullable(true));
-                    }
-                    for (TupleId tupleId : rightFragment.getPlanRoot().getTupleIds()) {
-                        context.getDescTbl().getTupleDesc(tupleId).getSlots().forEach(slot -> slot.setIsNullable(true));
-                    }
-                }
+                setNullableForJoin(joinOperator, leftFragment, rightFragment, context);
 
                 JoinNode joinNode;
                 if (node instanceof PhysicalHashJoinOperator) {

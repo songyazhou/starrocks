@@ -77,7 +77,7 @@ private:
     Status _read_chunk_from_storage([[maybe_unused]] RuntimeState* state, vectorized::Chunk* chunk);
     void _update_counter();
     void _update_realtime_counter(vectorized::Chunk* chunk);
-    void _decide_chunk_size();
+    void _decide_chunk_size(bool has_predicate);
 
 private:
     using ChunkWithToken = std::pair<vectorized::ChunkPtr, ChunkBufferTokenPtr>;
@@ -143,6 +143,8 @@ private:
     RuntimeProfile::Counter* _del_vec_filter_counter = nullptr;
     RuntimeProfile::Counter* _pred_filter_timer = nullptr;
     RuntimeProfile::Counter* _chunk_copy_timer = nullptr;
+    RuntimeProfile::Counter* _get_rowsets_timer = nullptr;
+    RuntimeProfile::Counter* _get_delvec_timer = nullptr;
     RuntimeProfile::Counter* _seg_init_timer = nullptr;
     RuntimeProfile::Counter* _zm_filtered_counter = nullptr;
     RuntimeProfile::Counter* _bf_filtered_counter = nullptr;

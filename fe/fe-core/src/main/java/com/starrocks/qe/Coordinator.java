@@ -64,6 +64,7 @@ import com.starrocks.planner.PlanNodeId;
 import com.starrocks.planner.ResultSink;
 import com.starrocks.planner.RuntimeFilterDescription;
 import com.starrocks.planner.ScanNode;
+import com.starrocks.planner.SchemaScanNode;
 import com.starrocks.proto.PExecPlanFragmentResult;
 import com.starrocks.proto.PPlanFragmentCancelReason;
 import com.starrocks.proto.StatusPB;
@@ -72,6 +73,7 @@ import com.starrocks.rpc.BackendServiceProxy;
 import com.starrocks.rpc.RpcException;
 import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.service.FrontendOptions;
+import com.starrocks.sql.PlannerProfile;
 import com.starrocks.sql.common.ErrorType;
 import com.starrocks.sql.common.StarRocksPlannerException;
 import com.starrocks.system.Backend;
@@ -99,6 +101,7 @@ import com.starrocks.thrift.TStatusCode;
 import com.starrocks.thrift.TTabletCommitInfo;
 import com.starrocks.thrift.TUniqueId;
 import com.starrocks.thrift.TUnit;
+import com.starrocks.thrift.TWorkGroup;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -131,6 +134,7 @@ import java.util.stream.Collectors;
 
 public class Coordinator {
     private static final Logger LOG = LogManager.getLogger(Coordinator.class);
+    private static final int DEFAULT_PROFILE_TIMEOUT_SECOND = 2;
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -208,7 +212,7 @@ public class Coordinator {
     private final boolean usePipeline;
 
     // Resource group
-    WorkGroup workGroup = null;
+    TWorkGroup workGroup = null;
 
     private final Map<PlanFragmentId, Map<Integer, TNetworkAddress>> fragmentIdToSeqToAddressMap = Maps.newHashMap();
     // fragment_id -> < bucket_seq -> < scannode_id -> scan_range_params >>
@@ -275,7 +279,7 @@ public class Coordinator {
         nextInstanceId.setHi(queryId.hi);
         nextInstanceId.setLo(queryId.lo + 1);
 
-        this.usePipeline = canUsePipeline(this.connectContext, this.fragments);
+        this.usePipeline = false;
     }
 
     public long getJobId() {
@@ -423,28 +427,48 @@ public class Coordinator {
                     DebugUtil.printId(queryId), descTable);
         }
 
-        // prepare information
-        prepare();
+        try (PlannerProfile.ScopedTimer _ = PlannerProfile.getScopedTimer("CoordPrepareExec")) {
+            resetFragmentState();
 
-        // prepare workgroup
-        this.workGroup = prepareWorkGroup(connectContext);
+            // prepare information
+            prepare();
 
-        // compute Fragment Instance
-        computeScanRangeAssignment();
+            // prepare workgroup
+            this.workGroup = prepareWorkGroup(connectContext);
 
-        computeFragmentExecParams();
+            // compute Fragment Instance
+            computeScanRangeAssignment();
 
-        traceInstance();
+            computeFragmentExecParams();
 
-        prepareResultSink();
+            traceInstance();
+        }
+
+        try (PlannerProfile.ScopedTimer _ = PlannerProfile.getScopedTimer("CoordDeliverExec")) {
+            prepareResultSink();
+        }
     }
 
-    public static WorkGroup prepareWorkGroup(ConnectContext connect) {
-        WorkGroup workgroup = null;
+    /**
+     * Reset state of all the fragments set in Coordinator, when retrying the same query with the fragments.
+     */
+    private void resetFragmentState() {
+        for (PlanFragment fragment : fragments) {
+            if (fragment instanceof MultiCastPlanFragment) {
+                MultiCastDataSink multiSink = (MultiCastDataSink) fragment.getSink();
+                for (List<TPlanFragmentDestination> destination : multiSink.getDestinations()) {
+                    destination.clear();
+                }
+            }
+        }
+    }
+
+    public static TWorkGroup prepareWorkGroup(ConnectContext connect) {
         if (connect == null || !connect.getSessionVariable().isEnableResourceGroup()) {
-            return workgroup;
+            return null;
         }
         SessionVariable sessionVariable = connect.getSessionVariable();
+        TWorkGroup workgroup = null;
 
         // 1. try to use the resource group specified by the variable
         if (StringUtils.isNotEmpty(sessionVariable.getResourceGroup())) {
@@ -455,8 +479,7 @@ public class Coordinator {
         // 2. try to use the resource group specified by workgroup_id
         long workgroupId = connect.getSessionVariable().getWorkGroupId();
         if (workgroup == null && workgroupId > 0) {
-            workgroup = new WorkGroup();
-            workgroup.setId(workgroupId);
+            workgroup = GlobalStateMgr.getCurrentState().getWorkGroupMgr().chooseWorkGroupByID(workgroupId);
         }
 
         // 3. if the specified resource group not exist try to use the default one
@@ -469,6 +492,8 @@ public class Coordinator {
         if (workgroup != null) {
             connect.getAuditEventBuilder().setResourceGroup(workgroup.getName());
             connect.setWorkGroup(workgroup);
+        } else {
+            connect.getAuditEventBuilder().setResourceGroup(WorkGroup.DEFAULT_WORKGROUP_NAME);
         }
 
         return workgroup;
@@ -1037,7 +1062,7 @@ public class Coordinator {
             // hash-partitioned
             // output at the moment
 
-            // set params for pipeline level shuffle
+            // Set params for pipeline level shuffle.
             params.fragment.getDestNode().setPartitionType(params.fragment.getOutputPartition().getType());
             if (sink instanceof DataStreamSink) {
                 DataStreamSink dataStreamSink = (DataStreamSink) sink;
@@ -1107,12 +1132,16 @@ public class Coordinator {
 
             for (int i = 0; i < multi.getDestFragmentList().size(); i++) {
                 PlanFragment destFragment = multi.getDestFragmentList().get(i);
-                DataSink sink = multiSink.getDataStreamSinks().get(i);
+                DataStreamSink sink = multiSink.getDataStreamSinks().get(i);
 
                 if (destFragment == null) {
                     continue;
                 }
                 FragmentExecParams destParams = fragmentExecParamsMap.get(destFragment.getFragmentId());
+
+                // Set params for pipeline level shuffle.
+                multi.getDestNode(i).setPartitionType(params.fragment.getOutputPartition().getType());
+                sink.setExchDop(destFragment.getPipelineDop());
 
                 PlanNodeId exchId = sink.getExchNodeId();
                 // MultiCastSink only send to itself, destination exchange only one senders
@@ -1271,7 +1300,13 @@ public class Coordinator {
 
                 if (dopAdaptionEnabled) {
                     Preconditions.checkArgument(leftMostNode instanceof ExchangeNode);
-                    maxParallelism = hostSet.size();
+                    // If the fragment use instance parallel, maxParallelism should be still equal to
+                    // the max total degree of parallelism.
+                    if (fragment.getParallelExecNum() > 1) {
+                        Preconditions.checkState(fragment.getPipelineDop() == 1);
+                    } else {
+                        maxParallelism = hostSet.size();
+                    }
                 }
 
                 // AddAll() soft copy()
@@ -1587,7 +1622,10 @@ public class Coordinator {
 
             FragmentScanRangeAssignment assignment =
                     fragmentExecParamsMap.get(scanNode.getFragmentId()).scanRangeAssignment;
-            if ((scanNode instanceof HdfsScanNode) || (scanNode instanceof IcebergScanNode) ||
+            if (scanNode instanceof SchemaScanNode) {
+                BackendSelector selector = new NormalBackendSelector(scanNode, locations, assignment);
+                selector.computeScanRangeAssignment();
+            } else if ((scanNode instanceof HdfsScanNode) || (scanNode instanceof IcebergScanNode) ||
                     scanNode instanceof HudiScanNode) {
                 HDFSBackendSelector selector = new HDFSBackendSelector(scanNode, locations, assignment,
                         ScanRangeAssignType.SCAN_DATA_SIZE, usedBackendIDs);
@@ -1690,7 +1728,13 @@ public class Coordinator {
         // wait for all backends
         if (needReport) {
             try {
-                int timeout = connectContext.getSessionVariable().getProfileTimeout();
+                int timeout;
+                // connectContext can be null for broker export task coordinator
+                if (connectContext != null) {
+                    timeout = connectContext.getSessionVariable().getProfileTimeout();
+                } else {
+                    timeout = DEFAULT_PROFILE_TIMEOUT_SECOND;
+                }
                 // Waiting for other fragment instances to finish execution
                 // Ideally, it should wait indefinitely, but out of defense, set timeout
                 if (!profileDoneSignal.await(timeout, TimeUnit.SECONDS)) {
@@ -2291,7 +2335,7 @@ public class Coordinator {
                         boolean enableResourceGroup = sessionVariable.isEnableResourceGroup();
                         params.setEnable_resource_group(enableResourceGroup);
                         if (enableResourceGroup && workGroup != null) {
-                            params.setWorkgroup(workGroup.toThrift());
+                            params.setWorkgroup(workGroup);
                         }
                     }
 
@@ -2743,8 +2787,9 @@ public class Coordinator {
 
     /**
      * Whether it can use pipeline engine.
+     *
      * @param connectContext It is null for broker broker export.
-     * @param fragments All the fragments need to execute.
+     * @param fragments      All the fragments need to execute.
      * @return true if enabling pipeline in the session variable and all the fragments can use pipeline,
      * otherwise false.
      */

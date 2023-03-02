@@ -644,6 +644,19 @@ constexpr int32_t convert_idx(ArrowTypeId at, PrimitiveType pt, bool is_nullable
     return (at << 17) | (pt << 2) | (is_nullable ? 2 : 0) | (is_strict ? 1 : 0);
 }
 
+// Convert Arrow null to any types
+Status null_converter(const arrow::Array* array, size_t array_start_idx, size_t num_elements, Column* column,
+                      size_t column_start_idx, uint8_t* null_data, uint8_t* filter_data, ArrowConvertContext* ctx) {
+    if (null_data == nullptr) {
+        return Status::InvalidArgument(fmt::format("The column ({}) must be nullable", ctx->current_slot->col_name()));
+    }
+    for (size_t i = 0; i < num_elements; i++) {
+        null_data[column_start_idx + i] = 1;
+    }
+    column->append_default(num_elements);
+    return {};
+}
+
 #define ARROW_CONV_SINGLE_ENTRY_CTOR(a, b, t0, t1) \
     { convert_idx(a, b, t0, t1), &ArrowConverter<a, b, t0, t1>::apply }
 
@@ -711,6 +724,9 @@ static const std::unordered_map<int32_t, ConvertFunc> global_optimized_arrow_con
 };
 
 ConvertFunc get_arrow_converter(ArrowTypeId at, PrimitiveType pt, bool is_nullable, bool is_strict) {
+    if (at == ArrowTypeId::NA) {
+        return null_converter;
+    }
     auto optimized_idx = convert_idx(at, pt, is_nullable, is_strict);
     auto it = global_optimized_arrow_conv_table.find(optimized_idx);
     if (it != global_optimized_arrow_conv_table.end()) {

@@ -1,16 +1,16 @@
 # CANCEL DECOMMISSION
 
-## description
+## Description
 
 This statement is used to undo a node decommission. (Administrator only!)
 
 Syntax:
 
 ```sql
-CANCEL DECOMMISSION BACKEND "host:heartbeat_port"[,"host:heartbeat_port"...];
+CANCEL DECOMMISSION BACKEND "<host>:<heartbeat_port>"[,"<host>:<heartbeat_port>"...]
 ```
 
-## example
+## Examples
 
 1. Cancel decommission of two nodes.
 

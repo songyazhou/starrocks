@@ -7,7 +7,6 @@ import com.starrocks.catalog.Table;
 import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.sql.optimizer.statistics.ColumnStatistic;
 import com.starrocks.sql.optimizer.statistics.EmptyStatisticStorage;
-import org.apache.commons.lang3.StringUtils;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -103,12 +102,12 @@ public class CTEPlanTest extends PlanTestBase {
         String sql = "with x0 as (select * from t0) " +
                 "select * from x0 x,t1 y where v1 in (select v2 from x0 z where z.v1 = x.v1)";
         String plan = getFragmentPlan(sql);
-        Assert.assertTrue(plan.contains("MultiCastDataSinks\n" +
+        Assert.assertTrue(plan.contains("  MultiCastDataSinks\n" +
                 "  STREAM DATA SINK\n" +
-                "    EXCHANGE ID: 02\n" +
+                "    EXCHANGE ID: 01\n" +
                 "    RANDOM\n" +
                 "  STREAM DATA SINK\n" +
-                "    EXCHANGE ID: 04\n" +
+                "    EXCHANGE ID: 03\n" +
                 "    RANDOM"));
 
         sql = "with x0 as (select * from t0) " +
@@ -116,10 +115,10 @@ public class CTEPlanTest extends PlanTestBase {
         plan = getFragmentPlan(sql);
         Assert.assertTrue(plan.contains("MultiCastDataSinks\n" +
                 "  STREAM DATA SINK\n" +
-                "    EXCHANGE ID: 02\n" +
+                "    EXCHANGE ID: 01\n" +
                 "    RANDOM\n" +
                 "  STREAM DATA SINK\n" +
-                "    EXCHANGE ID: 04\n" +
+                "    EXCHANGE ID: 03\n" +
                 "    RANDOM"));
     }
 
@@ -208,7 +207,7 @@ public class CTEPlanTest extends PlanTestBase {
                 "(select * from xx where xx.v2 = 2 limit 1) x1 join " +
                 "(select * from xx where xx.v3 = 4 limit 3) x2 on x1.v2=x2.v3;";
         String plan = getFragmentPlan(sql);
-        Assert.assertTrue(plan.contains("  0:OlapScanNode\n" +
+        assertContains(plan, "0:OlapScanNode\n" +
                 "     TABLE: t0\n" +
                 "     PREAGGREGATION: ON\n" +
                 "     PREDICATES: (3: v3 = 4) OR (2: v2 = 2)\n" +
@@ -216,10 +215,10 @@ public class CTEPlanTest extends PlanTestBase {
                 "     rollup: t0\n" +
                 "     tabletRatio=0/0\n" +
                 "     tabletList=\n" +
-                "     cardinality=0\n" +
+                "     cardinality=1\n" +
                 "     avgRowSize=24.0\n" +
                 "     numNodes=0\n" +
-                "     limit: 3"));
+                "     limit: 3");
     }
 
     @Test
@@ -276,13 +275,13 @@ public class CTEPlanTest extends PlanTestBase {
 
         String plan = getFragmentPlan(sql);
         defaultCTEReuse();
-        Assert.assertTrue(plan.contains("  5:SELECT\n" +
+        assertContains(plan, "3:SELECT\n" +
                 "  |  predicates: 4: v1 = 2\n" +
                 "  |  \n" +
-                "  4:Project\n" +
+                "  2:Project\n" +
                 "  |  <slot 4> : 1: v1\n" +
                 "  |  <slot 5> : 2: v2\n" +
-                "  |  <slot 6> : 3: v3"));
+                "  |  <slot 6> : 3: v3");
     }
 
     @Test
@@ -408,5 +407,21 @@ public class CTEPlanTest extends PlanTestBase {
                 "  RESULT SINK\n" +
                 "\n" +
                 "  2:AGGREGATE (update finalize)\n");
+    }
+
+    @Test
+    public void testNullTypeHack() throws Exception {
+        String sql = "WITH cte_1 AS (\n" +
+                "  SELECT null v1\n" +
+                ")\n" +
+                "SELECT  \n" +
+                "  CASE \n" +
+                "    WHEN a.v1 = b.v1 THEN 1 \n" +
+                "    ELSE -1 \n" +
+                "  END IS_OK\n" +
+                "FROM cte_1 a, cte_1 b";
+
+        String plan = getThriftPlan(sql);
+        assertNotContains(plan, "NULL_TYPE");
     }
 }

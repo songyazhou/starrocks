@@ -1,6 +1,6 @@
 # EXPORT
 
-## description
+## Description
 
 This statement is used to export the data in a specified table to a specified location.
 
@@ -11,11 +11,11 @@ This is an asynchronous operation, which returns if the task is submitted succes
 Syntax:
 
 ```sql
-EXPORT TABLE table_name
+EXPORT TABLE <table_name>
 [PARTITION (p1[,p2])]
 TO export_path
 [opt_properties]
-broker;
+WITH BROKER
 ```
 
 1. table_name
@@ -42,15 +42,13 @@ broker;
     [PROPERTIES ("key"="value", ...)]
     ```
 
-     The following parameters can be specified:
+    The following parameters can be specified:
 
-    ```plain text
-    column_separator: Specify the exported column separator, defaulting to t. 
-    line_delimiter: Specify the exported line separator, defaulting to\n. 
-    exec_mem_limit: Export the upper limit of memory usage for a single BE node, defaulting to 2GB in bytes.
-    timeout：The time-out for importing jobs, defaulting to 1 day in seconds.
-    include_query_id: Whether the exported file name contains query id, defaulting to true.
-    ```
+    - `column_separator`: specifies the exported column separator, defaulting to `t`.
+    - `line_delimiter`: specifies the exported line separator, defaulting to `\n`.
+    - `exec_mem_limit`: specifies the upper limit of memory usage for export jobs on a single BE node, defaulting to 2 GB in bytes.
+    - `timeout`：specifies the time-out period for export jobs, defaulting to 1 day in seconds.
+    - `include_query_id`: specifies whether the exported file name contains query ID, defaulting to `true`.
 
 5. broker
 
@@ -66,7 +64,7 @@ broker;
 
     For brokers corresponding to different storage systems, the input parameters are different. Specific parameters can be referred to: the required properties of broker in`help broker load`
 
-## example
+## Examples
 
 1. Export all data from the testTbl table to HDFS
 

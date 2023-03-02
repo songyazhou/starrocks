@@ -1,6 +1,6 @@
 # ADMIN SET REPLICA STATUS
 
-## description
+## Description
 
 This statement is used to set the status of the specified replicas.
 
@@ -10,7 +10,7 @@ Syntax:
 
 ```sql
 ADMIN SET REPLICA STATUS
-PROPERTIES ("key" = "value", ...);
+PROPERTIES ("key" = "value", ...)
 ```
 
 The following attributes are currently supported:
@@ -27,7 +27,7 @@ Note:
 
 Replicas set to Bad status may be dropped immediately, please proceed with caution.
 
-## example
+## Examples
 
 1. Set the replica status of tablet 10003 on BE 10001 to bad.
 

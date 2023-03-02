@@ -7,9 +7,9 @@ Deletes data from a partition of a table based on specified conditions and delet
 ### Syntax
 
 ```SQL
-DELETE FROM table_name [PARTITION partition_name]
+DELETE FROM <table_name> [PARTITION <partition_name>]
 WHERE
-column_name1 op { value | value_list } [ AND column_name2 op { value | value_list } ...];
+column_name1 op { value | value_list } [ AND column_name2 op { value | value_list } ...]
 ```
 
 ### Parameters
@@ -30,7 +30,7 @@ column_name1 op { value | value_list } [ AND column_name2 op { value | value_lis
 
 - If a primary key column that you specify as a condition for data deletion from a table cannot be found in the associated materialized view, the DELETE statement cannot be executed on the table.
 
-- The conditions that you specify are in ADN relations. If you want to specify conditions that are in OR relations, you must specify each condition by using one DELETE statement.
+- The conditions that you specify are in AND relations. If you want to specify conditions that are in OR relations, you must specify each condition by using one DELETE statement.
 
 ### Limits
 

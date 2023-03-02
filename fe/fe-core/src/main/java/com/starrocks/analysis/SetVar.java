@@ -22,7 +22,6 @@
 package com.starrocks.analysis;
 
 import com.google.common.base.Strings;
-import com.starrocks.catalog.WorkGroup;
 import com.starrocks.common.AnalysisException;
 import com.starrocks.common.ErrorCode;
 import com.starrocks.common.ErrorReport;
@@ -34,7 +33,9 @@ import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.GlobalVariable;
 import com.starrocks.qe.SessionVariable;
 import com.starrocks.server.GlobalStateMgr;
+import com.starrocks.sql.analyzer.SemanticException;
 import com.starrocks.system.HeartbeatFlags;
+import com.starrocks.thrift.TWorkGroup;
 import org.apache.commons.lang3.StringUtils;
 
 // change one variable.
@@ -163,12 +164,38 @@ public class SetVar {
             checkNonNegativeLongVariable(SessionVariable.SQL_SELECT_LIMIT);
         }
 
+        if (getVariable().equalsIgnoreCase(SessionVariable.QUERY_TIMEOUT)) {
+            String value = getValue().getStringValue();
+            try {
+                long queryTimeout = Long.parseLong(value);
+                if (queryTimeout <= 0) {
+                    throw new AnalysisException(SessionVariable.QUERY_TIMEOUT + " must be equal or greater than 0.");
+                }
+                if (queryTimeout > SessionVariable.MAX_QUERY_TIMEOUT) {
+                    throw new AnalysisException(SessionVariable.QUERY_TIMEOUT +
+                            String.format(" must be equal or smaller than %d.", SessionVariable.MAX_QUERY_TIMEOUT));
+                }
+            } catch (NumberFormatException ex) {
+                throw new AnalysisException(SessionVariable.SQL_SELECT_LIMIT + " is not a number");
+            }
+        }
+
         if (getVariable().equalsIgnoreCase(SessionVariable.RESOURCE_GROUP)) {
             String wgName = getValue().getStringValue();
             if (!StringUtils.isEmpty(wgName)) {
-                WorkGroup wg = GlobalStateMgr.getCurrentState().getWorkGroupMgr().chooseWorkGroupByName(wgName);
+                TWorkGroup wg = GlobalStateMgr.getCurrentState().getWorkGroupMgr().chooseWorkGroupByName(wgName);
                 if (wg == null) {
                     throw new AnalysisException("resource group not exists: " + wgName);
+                }
+            }
+        } else if (getVariable().equalsIgnoreCase(SessionVariable.WORKGROUP_ID) ||
+                getVariable().equalsIgnoreCase(SessionVariable.WORKGROUP_ID_V2)) {
+            long rgID = getValue().getLongValue();
+            if (rgID > 0) {
+                TWorkGroup wg =
+                        GlobalStateMgr.getCurrentState().getWorkGroupMgr().chooseWorkGroupByID(rgID);
+                if (wg == null) {
+                    throw new SemanticException("resource group not exists: " + rgID);
                 }
             }
         }

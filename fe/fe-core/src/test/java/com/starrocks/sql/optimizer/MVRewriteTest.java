@@ -21,6 +21,7 @@
 
 package com.starrocks.sql.optimizer;
 
+import com.starrocks.analysis.CreateMaterializedViewStmt;
 import com.starrocks.catalog.FunctionSet;
 import com.starrocks.common.FeConstants;
 import com.starrocks.utframe.StarRocksAssert;
@@ -1041,6 +1042,24 @@ public class MVRewriteTest {
     }
 
     @Test
+    public void testCaseWhenAggWithPartialOrderBy() throws Exception {
+        String query = "select k6, k7 from all_type_table where k6 = 1 group by k6, k7";
+
+        String createMVSQL = "CREATE MATERIALIZED VIEW partial_order_by_mv AS " +
+                "SELECT k6, k7 FROM all_type_table GROUP BY k6, k7 ORDER BY k6";
+        CreateMaterializedViewStmt createMaterializedViewStmt =
+                (CreateMaterializedViewStmt) UtFrameUtils.parseStmtWithNewParser(createMVSQL, starRocksAssert.getCtx());
+        createMaterializedViewStmt.getMVColumnItemList().forEach(k -> Assert.assertTrue(k.isKey()));
+
+        starRocksAssert.withMaterializedView(createMVSQL).query(query).explainContains("rollup: partial_order_by_mv");
+
+        String createMVSQL2 = "CREATE MATERIALIZED VIEW order_by_mv AS " +
+                "SELECT k6, k7 FROM all_type_table GROUP BY k6, k7 ORDER BY k6, k7";
+        starRocksAssert.withMaterializedView(createMVSQL2).query(query).explainContains("rollup: order_by_mv");
+    }
+
+
+    @Test
     public void testCaseWhenSelectMV() throws Exception {
         // NOTE(yan): add a field not used in query, so optimized plan will select mv
         // otherwise I doubt that will use fact table.
@@ -1139,15 +1158,19 @@ public class MVRewriteTest {
         String query =
                 "select deptno, sum(case salary when 1 then 2 when 2 then 3 end) as ssalary from " + EMPS_TABLE_NAME +
                         " group by deptno";
-        starRocksAssert.withMaterializedView(createEmpsMVSQL).query(query).explainContains(QUERY_USE_EMPS);
+        starRocksAssert.withMaterializedView(createEmpsMVSQL).query(query).explainWithout(QUERY_USE_EMPS_MV);
 
         query = "select deptno, sum(case deptno when 1 then 2 when 2 then 3 end) as ssalary from " + EMPS_TABLE_NAME +
                 " group by deptno";
-        starRocksAssert.query(query).explainContains(QUERY_USE_EMPS);
+        starRocksAssert.query(query).explainWithout(QUERY_USE_EMPS_MV);
 
         query = "select deptno, sum(case deptno when 1 then salary when 2 then 3 end) as ssalary from " +
                 EMPS_TABLE_NAME + " group by deptno";
-        starRocksAssert.query(query).explainContains(QUERY_USE_EMPS);
+        starRocksAssert.query(query).explainWithout(QUERY_USE_EMPS_MV);
+
+        query = "select deptno, sum(case deptno when 1 then salary when 2 then truncate(3.14,1) end) as ssalary from " +
+                EMPS_TABLE_NAME + " group by deptno";
+        starRocksAssert.query(query).explainWithout(QUERY_USE_EMPS_MV);
 
         query = "select deptno, sum(case deptno when 1 then salary when 2 then salary end) as ssalary from " +
                 EMPS_TABLE_NAME + " group by deptno";

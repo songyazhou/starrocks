@@ -4,11 +4,18 @@ import com.starrocks.catalog.OlapTable;
 import com.starrocks.common.FeConstants;
 import com.starrocks.common.Pair;
 import com.starrocks.planner.AggregationNode;
+import com.starrocks.planner.OlapScanNode;
+import com.starrocks.planner.PlanFragment;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.sql.optimizer.statistics.ColumnStatistic;
 import com.starrocks.sql.optimizer.statistics.MockTpchStatisticStorage;
+import com.starrocks.system.BackendCoreStat;
+import com.starrocks.thrift.TExplainLevel;
 import com.starrocks.utframe.UtFrameUtils;
 import mockit.Expectations;
+import mockit.Mock;
+import mockit.MockUp;
+import org.junit.After;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -18,6 +25,11 @@ public class DistributedEnvPlanWithCostTest extends DistributedEnvPlanTestBase {
     public static void beforeClass() throws Exception {
         DistributedEnvPlanTestBase.beforeClass();
         FeConstants.runningUnitTest = true;
+    }
+
+    @After
+    public void after() {
+        connectContext.getSessionVariable().setNewPlanerAggStage(0);
     }
 
     //  agg
@@ -624,16 +636,16 @@ public class DistributedEnvPlanWithCostTest extends DistributedEnvPlanTestBase {
         String plan = getCostExplain(sql);
 
         // eval predicate cardinality in scan node
-        assertContains(plan, "0:OlapScanNode\n" +
+        assertContains(plan, "4:OlapScanNode\n" +
                 "     table: nation, rollup: nation\n" +
                 "     preAggregation: on\n" +
-                "     Predicates: 23: N_NATIONKEY IN (2, 1)\n" +
+                "     Predicates: 18: N_NATIONKEY IN (1, 2)\n" +
                 "     partitionsRatio=1/1, tabletsRatio=1/1");
         // eval predicate cardinality in join node
-        assertContains(plan, "3:CROSS JOIN\n" +
+        assertContains(plan, "6:CROSS JOIN\n" +
                 "  |  cross join:\n" +
                 "  |  predicates: ((18: N_NATIONKEY = 1) AND (23: N_NATIONKEY = 2)) OR ((18: N_NATIONKEY = 2) AND (23: N_NATIONKEY = 1))\n" +
-                "  |  cardinality: 2");
+                "  |  cardinality: 1");
     }
 
     @Test
@@ -996,11 +1008,22 @@ public class DistributedEnvPlanWithCostTest extends DistributedEnvPlanTestBase {
 
     @Test
     public void testPruneAggNode() throws Exception {
+        int numCores = 8;
+        int expectedParallelism = numCores / 2;
+        new MockUp<BackendCoreStat>() {
+            @Mock
+            public int getAvgNumOfHardwareCoresOfBe() {
+                return numCores;
+            }
+        };
+
         ConnectContext.get().getSessionVariable().setNewPlanerAggStage(3);
         String sql = "select count(distinct C_NAME) from customer group by C_CUSTKEY;";
-        String plan = getFragmentPlan(sql);
-
-        assertContains(plan, "2:AGGREGATE (update finalize)\n" +
+        ExecPlan plan = getExecPlan(sql);
+        PlanFragment fragment = plan.getFragments().get(1);
+        Assert.assertEquals(1, fragment.getPipelineDop());
+        Assert.assertEquals(expectedParallelism, fragment.getParallelExecNum());
+        assertContains(plan.getExplainString(TExplainLevel.NORMAL), "2:AGGREGATE (update finalize)\n" +
                 "  |  output: count(2: C_NAME)\n" +
                 "  |  group by: 1: C_CUSTKEY\n" +
                 "  |  \n" +
@@ -1009,8 +1032,11 @@ public class DistributedEnvPlanWithCostTest extends DistributedEnvPlanTestBase {
 
         ConnectContext.get().getSessionVariable().setNewPlanerAggStage(4);
         sql = "select count(distinct C_CUSTKEY) from customer;";
-        plan = getFragmentPlan(sql);
-        assertContains(plan, " 2:AGGREGATE (update serialize)\n" +
+        plan = getExecPlan(sql);
+        fragment = plan.getFragments().get(1);
+        Assert.assertEquals(1, fragment.getPipelineDop());
+        Assert.assertEquals(expectedParallelism, fragment.getParallelExecNum());
+        assertContains(plan.getExplainString(TExplainLevel.NORMAL), " 2:AGGREGATE (update serialize)\n" +
                 "  |  output: count(1: C_CUSTKEY)\n" +
                 "  |  group by: \n" +
                 "  |  \n" +
@@ -1020,8 +1046,11 @@ public class DistributedEnvPlanWithCostTest extends DistributedEnvPlanTestBase {
         ConnectContext.get().getSessionVariable().setNewPlanerAggStage(0);
 
         sql = "select count(distinct C_CUSTKEY, C_NAME) from customer;";
-        plan = getFragmentPlan(sql);
-        assertContains(plan, " 2:AGGREGATE (update serialize)\n" +
+        plan = getExecPlan(sql);
+        fragment = plan.getFragments().get(1);
+        Assert.assertEquals(1, fragment.getPipelineDop());
+        Assert.assertEquals(expectedParallelism, fragment.getParallelExecNum());
+        assertContains(plan.getExplainString(TExplainLevel.NORMAL), " 2:AGGREGATE (update serialize)\n" +
                 "  |  output: count(if(1: C_CUSTKEY IS NULL, NULL, 2: C_NAME))\n" +
                 "  |  group by: \n" +
                 "  |  \n" +
@@ -1029,13 +1058,92 @@ public class DistributedEnvPlanWithCostTest extends DistributedEnvPlanTestBase {
                 "  |  group by: 1: C_CUSTKEY, 2: C_NAME");
 
         sql = "select count(distinct C_CUSTKEY, C_NAME) from customer group by C_CUSTKEY;";
-        plan = getFragmentPlan(sql);
-        assertContains(plan, "  2:AGGREGATE (update finalize)\n" +
+        plan = getExecPlan(sql);
+        fragment = plan.getFragments().get(1);
+        Assert.assertEquals(1, fragment.getPipelineDop());
+        Assert.assertEquals(expectedParallelism, fragment.getParallelExecNum());
+        assertContains(plan.getExplainString(TExplainLevel.NORMAL), "  2:AGGREGATE (update finalize)\n" +
                 "  |  output: count(if(1: C_CUSTKEY IS NULL, NULL, 2: C_NAME))\n" +
                 "  |  group by: 1: C_CUSTKEY\n" +
                 "  |  \n" +
                 "  1:AGGREGATE (update serialize)\n" +
                 "  |  group by: 1: C_CUSTKEY, 2: C_NAME");
+    }
+
+    @Test
+    public void testAggNodeAndBucketDistribution() throws Exception {
+        int numCores = 8;
+        int expectedParallelism = numCores / 2;
+        new MockUp<BackendCoreStat>() {
+            @Mock
+            public int getAvgNumOfHardwareCoresOfBe() {
+                return numCores;
+            }
+        };
+
+        // For the local one-phase aggregation, prefer instance parallel.
+        String sql = "select count(1) from customer group by C_CUSTKEY";
+        ExecPlan plan = getExecPlan(sql);
+        PlanFragment fragment = plan.getFragments().get(1);
+        Assert.assertEquals(1, fragment.getPipelineDop());
+        Assert.assertEquals(expectedParallelism, fragment.getParallelExecNum());
+        assertContains(fragment.getExplainString(TExplainLevel.NORMAL), "  1:AGGREGATE (update finalize)\n" +
+                "  |  output: count(1)\n" +
+                "  |  group by: 1: C_CUSTKEY\n" +
+                "  |  \n" +
+                "  0:OlapScanNode");
+
+        // For the none-local one-phase aggregation, prefer pipeline parallel.
+        ConnectContext.get().getSessionVariable().setNewPlanerAggStage(1);
+        sql = "select count(1) from customer group by C_NAME";
+        plan = getExecPlan(sql);
+        fragment = plan.getFragments().get(2);
+        Assert.assertEquals(expectedParallelism, fragment.getPipelineDop());
+        Assert.assertEquals(1, fragment.getParallelExecNum());
+        assertContains(fragment.getExplainString(TExplainLevel.NORMAL), "  STREAM DATA SINK\n" +
+                "    EXCHANGE ID: 01\n" +
+                "    HASH_PARTITIONED: 2: C_NAME\n" +
+                "\n" +
+                "  0:OlapScanNode");
+
+        // For the two-phase aggregation, prefer pipeline parallel.
+        ConnectContext.get().getSessionVariable().setNewPlanerAggStage(2);
+        sql = "select count(1) from customer group by C_NAME";
+        plan = getExecPlan(sql);
+        fragment = plan.getFragments().get(2);
+        Assert.assertEquals(expectedParallelism, fragment.getPipelineDop());
+        Assert.assertEquals(1, fragment.getParallelExecNum());
+        assertContains(fragment.getExplainString(TExplainLevel.NORMAL), "  1:AGGREGATE (update serialize)\n" +
+                "  |  STREAMING\n" +
+                "  |  output: count(1)\n" +
+                "  |  group by: 2: C_NAME\n" +
+                "  |  \n" +
+                "  0:OlapScanNode");
+
+        // For the none-pruned four-phase aggregation, prefer pipeline parallel.
+        ConnectContext.get().getSessionVariable().setNewPlanerAggStage(0);
+        sql = "select count(distinct C_ADDRESS) from customer group by C_NAME";
+        plan = getExecPlan(sql);
+        fragment = plan.getFragments().get(2);
+        Assert.assertEquals(expectedParallelism, fragment.getPipelineDop());
+        Assert.assertEquals(1, fragment.getParallelExecNum());
+        assertContains(fragment.getExplainString(TExplainLevel.NORMAL), "  1:AGGREGATE (update serialize)\n" +
+                "  |  STREAMING\n" +
+                "  |  group by: 2: C_NAME, 3: C_ADDRESS\n" +
+                "  |  \n" +
+                "  0:OlapScanNode");
+
+        // For the none-pruned three-phase aggregation, prefer pipeline parallel.
+        sql = "select count(distinct C_ADDRESS) from customer";
+        plan = getExecPlan(sql);
+        fragment = plan.getFragments().get(2);
+        Assert.assertEquals(expectedParallelism, fragment.getPipelineDop());
+        Assert.assertEquals(1, fragment.getParallelExecNum());
+        assertContains(fragment.getExplainString(TExplainLevel.NORMAL), "  1:AGGREGATE (update serialize)\n" +
+                "  |  STREAMING\n" +
+                "  |  group by: 3: C_ADDRESS\n" +
+                "  |  \n" +
+                "  0:OlapScanNode");
     }
 
     @Test
@@ -1123,11 +1231,11 @@ public class DistributedEnvPlanWithCostTest extends DistributedEnvPlanTestBase {
         String sql = "select * from t0 j0 join " +
                 "(select v3, sum(v2) as x2 from t0 group by v3) j1 on j0.v3 = j1.v3 and j0.v2 = j1.x2";
         String plan = getFragmentPlan(sql);
-        assertContains(plan, "  STREAM DATA SINK\n" +
-                "    EXCHANGE ID: 05\n" +
-                "    UNPARTITIONED\n" +
+        assertContains(plan, "STREAM DATA SINK\n" +
+                "    EXCHANGE ID: 06\n" +
+                "    HASH_PARTITIONED: 6: v3, 7: sum\n" +
                 "\n" +
-                "  4:AGGREGATE (merge finalize)");
+                "  5:AGGREGATE (merge finalize)");
     }
 
     @Test
@@ -1264,5 +1372,49 @@ public class DistributedEnvPlanWithCostTest extends DistributedEnvPlanTestBase {
         assertContains(plan, "1:AGGREGATE (update serialize)\n" +
                 "  |  STREAMING\n" +
                 "  |  group by: 2: P_NAME");
+    }
+
+    @Test
+    public void testAggExecuteInOneTablet() throws Exception {
+        String sql;
+        String plan;
+        ExecPlan execPlan;
+        OlapScanNode olapScanNode;
+
+        // dates_n only contains one tablet.
+        sql = "select count(d_datekey), d_date from dates_n group by d_date";
+        execPlan = getExecPlan(sql);
+        olapScanNode = (OlapScanNode) execPlan.getScanNodes().get(0);
+        Assert.assertEquals(0, olapScanNode.getBucketExprs().size());
+        plan = execPlan.getExplainString(TExplainLevel.NORMAL);
+        assertContains(plan, "  1:AGGREGATE (update finalize)\n" +
+                "  |  output: count(1: d_datekey)\n" +
+                "  |  group by: 2: d_date\n" +
+                "  |  \n" +
+                "  0:OlapScanNode");
+
+        // dates_n only contains one tablet.
+        sql = "select count(d_date), d_datekey from dates_n group by d_datekey";
+        execPlan = getExecPlan(sql);
+        olapScanNode = (OlapScanNode) execPlan.getScanNodes().get(0);
+        Assert.assertEquals(0, olapScanNode.getBucketExprs().size());
+        plan = execPlan.getExplainString(TExplainLevel.NORMAL);
+        assertContains(plan, "  1:AGGREGATE (update finalize)\n" +
+                "  |  output: count(2: d_date)\n" +
+                "  |  group by: 1: d_datekey\n" +
+                "  |  \n" +
+                "  0:OlapScanNode");
+
+        // lineorder_new_l contains more than one tablet.
+        sql = "select count(P_TYPE), LO_ORDERKEY from lineorder_new_l group by LO_ORDERKEY";
+        execPlan = getExecPlan(sql);
+        olapScanNode = (OlapScanNode) execPlan.getScanNodes().get(0);
+        Assert.assertEquals(1, olapScanNode.getBucketExprs().size());
+        plan = execPlan.getExplainString(TExplainLevel.NORMAL);
+        assertContains(plan, "  1:AGGREGATE (update finalize)\n" +
+                "  |  output: count(36: P_TYPE)\n" +
+                "  |  group by: 1: LO_ORDERKEY\n" +
+                "  |  \n" +
+                "  0:OlapScanNode");
     }
 }

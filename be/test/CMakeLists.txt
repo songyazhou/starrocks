@@ -52,6 +52,7 @@ set(EXEC_FILES
         ./exec/pipeline/query_context_manger_test.cpp
         ./exec/pipeline/query_context_test.cpp
         ./exec/pipeline/table_function_operator_test.cpp
+        ./exec/pipeline/pipeline_driver_queue_test.cpp
         ./exprs/agg/json_each_test.cpp
         ./exprs/agg/aggregate_test.cpp
         ./exprs/vectorized/arithmetic_expr_test.cpp
@@ -110,6 +111,7 @@ set(EXEC_FILES
         ./formats/csv/datetime_converter_test.cpp
         ./formats/csv/decimalv2_converter_test.cpp
         ./formats/csv/float_converter_test.cpp
+        ./formats/csv/json_converter_test.cpp
         ./formats/csv/nullable_converter_test.cpp
         ./formats/csv/numeric_converter_test.cpp
         ./formats/json/binary_column_test.cpp
@@ -227,7 +229,6 @@ set(EXEC_FILES
         ./runtime/stream_load_pipe_test.cpp
         ./runtime/string_value_test.cpp
         ./runtime/type_descriptor_test.cpp
-        ./runtime/thread_resource_mgr_test.cpp
         ./runtime/type_descriptor_test.cpp
         ./runtime/vectorized/sorted_chunks_merger_test.cpp
         ./runtime/memory_scratch_sink_test_issue_8676.cpp
@@ -292,6 +293,8 @@ endif()
 # Unset architecture-specific flags to avoid breaking implement runtime dispatch.
 
 if ("${CMAKE_BUILD_TARGET_ARCH}" STREQUAL "x86" OR "${CMAKE_BUILD_TARGET_ARCH}" STREQUAL "x86_64")
+        set_source_files_properties(./column/json_column_test.cpp PROPERTIES COMPILE_FLAGS -mno-avx)
+        set_source_files_properties(./column/json_column_test.cpp PROPERTIES COMPILE_FLAGS -mno-avx2)
         set_source_files_properties(./exprs/vectorized/json_functions_test.cpp PROPERTIES COMPILE_FLAGS -mno-avx)
         set_source_files_properties(./exprs/vectorized/json_functions_test.cpp PROPERTIES COMPILE_FLAGS -mno-avx2)
         set_source_files_properties(./exprs/vectorized/json_functions_test.cpp PROPERTIES COMPILE_FLAGS -mno-avx)

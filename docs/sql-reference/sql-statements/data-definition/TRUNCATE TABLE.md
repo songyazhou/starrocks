@@ -1,13 +1,13 @@
 # TRUNCATE TABLE
 
-## description
+## Description
 
 This statement is used to truncate the specified table and partition data.
 
 Syntax:
 
 ```sql
-TRUNCATE TABLE [db.]tbl[ PARTITION(p1, p2, ...)];
+TRUNCATE TABLE [db.]tbl[ PARTITION(p1, p2, ...)]
 ```
 
 Note:
@@ -18,7 +18,7 @@ Note:
 4. The data deleted by this operation cannot be recovered.
 5. When using this command, the table state should be NORMAL, i.e. SCHEMA CHANGE operations are not allowed.
 
-## example
+## Examples
 
 1. Truncate table tbl under example_db.
 

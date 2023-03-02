@@ -22,6 +22,13 @@ Broker Load supports the following data file formats:
 
 - ORC
 
+> **NOTE**
+>
+> For CSV data, take note of the following points:
+>
+> - You can use a UTF-8 string, such as a comma (,), tab, or pipe (|), whose length does not exceed 50 bytes as a text delimiter.
+> - Null values are denoted by using `\N`. For example, a data file consists of three columns, and a record from that data file holds data in the first and third columns but no data in the second column. In this situation, you need to use `\N` in the second column to denote a null value. This means the record must be compiled as `a,\N,b` instead of `a,,b`. `a,,b` denotes that the second column of the record holds an empty string.
+
 ## Supported storage systems
 
 Broker Load supports the following storage systems:
@@ -36,17 +43,17 @@ Broker Load supports the following storage systems:
 
 Brokers are deployed in your StarRocks cluster.
 
-You can use the [SHOW BROKER](../sql-reference/sql-statements/Administration/SHOW%20BROKER.md) statement to check for brokers that are deployed in your StarRocks cluster. If no brokers are deployed, you must deploy brokers by following the instructions provided in [Deploy a broker](../quick_start/Deploy.md#deploy-broker).
+You can use the [SHOW BROKER](../sql-reference/sql-statements/Administration/SHOW%20BROKER.md) statement to check for brokers that are deployed in your StarRocks cluster. If no brokers are deployed, you must deploy brokers by following the instructions provided in [Deploy a broker](../administration/deploy_broker.md).
 
 In this topic, assume that a group of brokers collectively named 'mybroker' are deployed in your StarRocks cluster.
 
-## Principles
+## How it works
 
 After you submit a load job to an FE, the FE generates a query plan, splits the query plan into portions based on the number of BEs and the size of the data file you want to load, and then assigns each portion of the query plan to a specific BE. During the load, each BE pulls the data of the data file by using the broker, pre-processes the data, and then loads the data into your StarRocks cluster. After all BEs finish their portions of the query plan, the FE determines whether the load job is successful.
 
 The following figure shows the workflow of a Broker Load job.
 
-![Workflow of Broker Load](../assets/4.3-1.png)
+![Workflow of Broker Load](../assets/4.3-1-en.png)
 
 ## Basic operations
 
@@ -102,7 +109,7 @@ This topic uses CSV as an example to describe how to load data. For information 
    200,'Beijing'
    ```
 
-3. Upload `file1.csv` and `file2.csv` to the `/user/starrocks/` path of your HDFS cluster, to the `/input/` folder of your Amazon S3 bucket `bucket_s3`, and to the `/input/` folder of your Google CGS bucket `bucket_gcs`.
+3. Upload `file1.csv` and `file2.csv` to the `/user/starrocks/` path of your HDFS cluster, to the `input` folder of your Amazon S3 bucket `bucket_s3`, and to the `input` folder of your Google GCS bucket `bucket_gcs`.
 
 #### Load data from HDFS
 
@@ -115,7 +122,7 @@ LOAD LABEL test_db.label1
     INTO TABLE table1
     COLUMNS TERMINATED BY ","
     (id, city)
-
+    ,
     DATA INFILE("hdfs://<hdfs_host>:<hdfs_port>/user/starrocks/file2.csv")
     INTO TABLE table2
     COLUMNS TERMINATED BY ","
@@ -134,42 +141,49 @@ PROPERTIES
 
 #### Load data from Amazon S3
 
-Execute the following statement to load `file1.csv` and `file2.csv` from the `/input/` folder of your Amazon S3 bucket `bucket_s3` into `table1` and `table2`, respectively:
+Execute the following statement to load `file1.csv` and `file2.csv` from the `input` folder of your Amazon S3 bucket `bucket_s3` into `table1` and `table2`, respectively:
 
 ```SQL
 LOAD LABEL test_db.label2
 (
     DATA INFILE("s3a://bucket_s3/input/file1.csv")
     INTO TABLE table1
+    COLUMNS TERMINATED BY ","
     (id, city)
-    
+    ,
     DATA INFILE("s3a://bucket_s3/input/file2.csv")
     INTO TABLE table2
+    COLUMNS TERMINATED BY ","
     (id, name, score)
 )
 WITH BROKER "mybroker"
 (
     "fs.s3a.access.key" = "xxxxxxxxxxxxxxxxxxxx",
     "fs.s3a.secret.key" = "yyyyyyyyyyyyyyyyyyyy",
-    "fs.s3a.endpoint" = "s3-ap-northeast-1.amazonaws.com"
-)
+    "fs.s3a.endpoint" = "s3.ap-northeast-1.amazonaws.com"
+);
 ```
 
-> Note: S3A is used for data loads from Amazon S3. Therefore, the file paths that you specify must start with the prefix `s3a://`.
+> **NOTE**
+>
+> - Broker Load supports accessing AWS S3 only according to the S3A protocol. Therefore, when you load data from AWS S3, you must replace `s3://` in the S3 URI you pass as a file path into `DATA INFILE` with `s3a://`.
+> - If the IAM role associated with your Amazon EC2 instance is granted permission to access your Amazon S3 bucket, you can leave `fs.s3a.access.key` and `fs.s3a.secret.key` unspecified.
 
 #### Load data from Google GCS
 
-Execute the following statement to load `file1.csv` and `file2.csv` from the `/input/` folder of your Google GCS bucket `bucket_gcs` into `table1` and `table2`, respectively:
+Execute the following statement to load `file1.csv` and `file2.csv` from the `input` folder of your Google GCS bucket `bucket_gcs` into `table1` and `table2`, respectively:
 
 ```SQL
 LOAD LABEL test_db.label3
 (
     DATA INFILE("s3a://bucket_gcs/input/file1.csv")
     INTO TABLE table1
+    COLUMNS TERMINATED BY ","
     (id, city)
-    
+    ,
     DATA INFILE("s3a://bucket_gcs/input/file2.csv")
     INTO TABLE table2
+    COLUMNS TERMINATED BY ","
     (id, name, score)
 )
 WITH BROKER "mybroker"
@@ -177,12 +191,14 @@ WITH BROKER "mybroker"
     "fs.s3a.access.key" = "xxxxxxxxxxxxxxxxxxxx",
     "fs.s3a.secret.key" = "yyyyyyyyyyyyyyyyyyyy",
     "fs.s3a.endpoint" = "storage.googleapis.com"
-)
+);
 ```
 
-> Note: S3A is used for data loads from Amazon S3. Therefore, the file paths that you specify must start with the prefix `s3a://`.
+> **NOTE**
+>
+> Broker Load supports accessing Google GCS only according to the S3A protocol. Therefore, when you load data from Google GCS, you must replace the prefix in the GCS URI you pass as a file path into `DATA INFILE` with `s3a://`.
 
-### Query data
+#### Query data
 
 After the load of data from your HDFS cluster, Amazon S3 bucket, or Google GCS bucket is complete, you can use the SELECT statement to query the data of the StarRocks tables to verify that the load is successful.
 
@@ -201,7 +217,7 @@ After the load of data from your HDFS cluster, Amazon S3 bucket, or Google GCS b
    4 rows in set (0.00 sec)
    ```
 
-1. Execute the following statement to query the data of `table2`:
+2. Execute the following statement to query the data of `table2`:
 
    ```SQL
    MySQL [test_db]> SELECT * FROM table2;
@@ -212,6 +228,46 @@ After the load of data from your HDFS cluster, Amazon S3 bucket, or Google GCS b
    +------+--------+
    4 rows in set (0.01 sec)
    ```
+
+#### Usage notes
+
+The preceding load examples show how to load multiple data files into multiple destination tables. You can also load a single data file or all data files from a specified path into a single destination table. Suppose your Amazon S3 bucket `bucket_s3` contains a folder named `input`. The `input` folder contains multiple data files, one of which is named `file1.csv`. These data files consist of the same number of columns as `table1` and the columns from each of these data files can be mapped one on one in sequence to the columns from `table1`.
+
+To load `file1.csv` into `table1`, execute the following statement:
+
+```SQL
+LOAD LABEL test_db.label_7
+(
+    DATA INFILE("s3a://bucket_s3/input/file1.csv")
+    INTO TABLE table1
+    COLUMNS TERMINATED BY ","
+    FORMAT AS "CSV"
+)
+WITH BROKER "mybroker"
+(
+    "fs.s3a.access.key" = "xxxxxxxxxxxxxxxxxxxx",
+    "fs.s3a.secret.key" = "yyyyyyyyyyyyyyyyyyyy",
+    "fs.s3a.endpoint" = "s3.ap-northeast-1.amazonaws.com"
+)；
+```
+
+To load all data files from the `input` folder into `table1`, execute the following statement:
+
+```SQL
+LOAD LABEL test_db.label_8
+(
+    DATA INFILE("s3a://bucket_s3/input/*")
+    INTO TABLE table1
+    COLUMNS TERMINATED BY ","
+    FORMAT AS "CSV"
+)
+WITH BROKER "mybroker"
+(
+    "fs.s3a.access.key" = "xxxxxxxxxxxxxxxxxxxx",
+    "fs.s3a.secret.key" = "yyyyyyyyyyyyyyyyyyyy",
+    "fs.s3a.endpoint" = "s3.ap-northeast-1.amazonaws.com"
+)；
+```
 
 ### View a load job
 

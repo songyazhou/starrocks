@@ -1,8 +1,8 @@
 # ALTER DATABASE
 
-## description
+## Description
 
-The statement is used to set the properties of the specified database. (Administrators only)
+Configures the properties of the specified database. (Administrator only)
 
 1. Set database data quota in B/K/KB/M/MB/G/GB/T/TB/P/PB unit.
 
@@ -29,7 +29,7 @@ After renaming the database, use REVOKE and GRANT commands to modify the corresp
 The database's default data quota and the default replica quota are 2^63-1.
 ```
 
-## example
+## Examples
 
 1. Set specified database data quota
 

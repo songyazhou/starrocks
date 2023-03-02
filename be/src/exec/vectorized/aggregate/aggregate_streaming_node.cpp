@@ -198,7 +198,7 @@ Status AggregateStreamingNode::get_next(RuntimeState* state, ChunkPtr* chunk, bo
 
         if (_aggregator->hash_map_variant().size() > 0) {
             // child has iterator over, and the hashtable has data
-            _output_chunk_from_hash_map(chunk);
+            RETURN_IF_ERROR(_output_chunk_from_hash_map(chunk));
             *eos = false;
             _aggregator->process_limit(chunk);
             DCHECK_CHUNK(*chunk);
@@ -218,7 +218,7 @@ Status AggregateStreamingNode::get_next(RuntimeState* state, ChunkPtr* chunk, bo
     return Status::OK();
 }
 
-void AggregateStreamingNode::_output_chunk_from_hash_map(ChunkPtr* chunk) {
+Status AggregateStreamingNode::_output_chunk_from_hash_map(ChunkPtr* chunk) {
     if (!_aggregator->it_hash().has_value()) {
         if (false) {
         }
@@ -236,24 +236,21 @@ void AggregateStreamingNode::_output_chunk_from_hash_map(ChunkPtr* chunk) {
     if (false) {
     }
 #define HASH_MAP_METHOD(NAME)                                                                                     \
-    else if (_aggregator->hash_map_variant().type == AggHashMapVariant::Type::NAME)                               \
+    else if (_aggregator->hash_map_variant().type == AggHashMapVariant::Type::NAME) RETURN_IF_ERROR(              \
             _aggregator->convert_hash_map_to_chunk<decltype(_aggregator->hash_map_variant().NAME)::element_type>( \
-                    *_aggregator->hash_map_variant().NAME, runtime_state()->chunk_size(), chunk);
+                    *_aggregator->hash_map_variant().NAME, runtime_state()->chunk_size(), chunk));
     APPLY_FOR_AGG_VARIANT_ALL(HASH_MAP_METHOD)
 #undef HASH_MAP_METHOD
     else {
         DCHECK(false);
     }
+    return Status::OK();
 }
 
-std::vector<std::shared_ptr<pipeline::OperatorFactory> > AggregateStreamingNode::decompose_to_pipeline(
-        pipeline::PipelineBuilderContext* context) {
+pipeline::OpFactories AggregateStreamingNode::decompose_to_pipeline(pipeline::PipelineBuilderContext* context) {
     using namespace pipeline;
+
     OpFactories operators_with_sink = _children[0]->decompose_to_pipeline(context);
-    // We cannot get degree of parallelism from PipelineBuilderContext, of which is only a suggest value
-    // and we may set other parallelism for source operator in many special cases
-    size_t degree_of_parallelism =
-            down_cast<SourceOperatorFactory*>(operators_with_sink[0].get())->degree_of_parallelism();
 
     // shared by sink operator factory and source operator factory
     AggregatorFactoryPtr aggregator_factory = std::make_shared<AggregatorFactory>(_tnode);
@@ -275,7 +272,8 @@ std::vector<std::shared_ptr<pipeline::OperatorFactory> > AggregateStreamingNode:
 
     // Aggregator must be used by a pair of sink and source operators,
     // so operators_with_source's degree of parallelism must be equal with operators_with_sink's
-    source_operator->set_degree_of_parallelism(degree_of_parallelism);
+    auto* upstream_source_op = context->source_operator(operators_with_sink);
+    context->inherit_upstream_source_properties(source_operator.get(), upstream_source_op);
     operators_with_source.push_back(std::move(source_operator));
     if (limit() != -1) {
         operators_with_source.emplace_back(

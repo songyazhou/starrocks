@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "common/status.h"
+#include "exec/vectorized/schema_scanner/schema_be_tablets_scanner.h"
 #include "gen_cpp/MasterService_types.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "gutil/stl_util.h"
@@ -934,8 +935,17 @@ void TabletUpdates::_apply_rowset_commit(const EditVersionInfo& version_info) {
             return;
         }
         // 4. write meta
-        st = TabletMetaManager::apply_rowset_commit(_tablet.data_dir(), tablet_id, _next_log_id, version, new_del_vecs,
-                                                    index_meta, enable_persistent_index);
+        const auto& rowset_meta_pb = rowset->rowset_meta()->get_meta_pb();
+        if (rowset_meta_pb.has_txn_meta()) {
+            rowset->rowset_meta()->clear_txn_meta();
+            st = TabletMetaManager::apply_rowset_commit(_tablet.data_dir(), tablet_id, _next_log_id, version,
+                                                        new_del_vecs, index_meta, enable_persistent_index,
+                                                        &(rowset->rowset_meta()->get_meta_pb()));
+        } else {
+            st = TabletMetaManager::apply_rowset_commit(_tablet.data_dir(), tablet_id, _next_log_id, version,
+                                                        new_del_vecs, index_meta, enable_persistent_index, nullptr);
+        }
+
         if (!st.ok()) {
             std::string msg = Substitute("_apply_rowset_commit error: write meta failed: $0 $1", st.to_string(),
                                          _debug_string(false));
@@ -1009,7 +1019,7 @@ Status TabletUpdates::_wait_for_version(const EditVersion& version, int64_t time
     }
     int64_t wait_start = MonotonicMillis();
     while (true) {
-        if (!_apply_running) {
+        if (_apply_stopped) {
             return Status::InternalError(Substitute("wait_for_version version:$0 failed: apply stopped $1",
                                                     version.to_string(), _debug_string(false, true)));
         }
@@ -1323,7 +1333,7 @@ void TabletUpdates::_apply_compaction_commit(const EditVersionInfo& version_info
         }
         // 3. write meta
         st = TabletMetaManager::apply_rowset_commit(_tablet.data_dir(), tablet_id, _next_log_id, version_info.version,
-                                                    delvecs, index_meta, enable_persistent_index);
+                                                    delvecs, index_meta, enable_persistent_index, nullptr);
         if (!st.ok()) {
             manager->index_cache().release(index_entry);
             std::string msg = Substitute("_apply_compaction_commit error: write meta failed: $0 $1", st.to_string(),
@@ -1405,26 +1415,6 @@ void TabletUpdates::to_updates_pb(TabletUpdatesPB* updates_pb) const {
     _to_updates_pb_unlocked(updates_pb);
 }
 
-void TabletUpdates::_erase_expired_versions(int64_t expire_time,
-                                            std::vector<std::unique_ptr<EditVersionInfo>>* expire_list) {
-    DCHECK(expire_list->empty());
-    std::lock_guard l(_lock);
-    if (_edit_version_infos.empty()) {
-        LOG(WARNING) << "tablet deleted when erase_expired_versions tablet:" << _tablet.tablet_id();
-        return;
-    }
-    for (int i = 0; i < _apply_version_idx; i++) {
-        if (_edit_version_infos[i]->creation_time <= expire_time) {
-            expire_list->emplace_back(std::move(_edit_version_infos[i]));
-        } else {
-            break;
-        }
-    }
-    auto n = expire_list->size();
-    _edit_version_infos.erase(_edit_version_infos.begin(), _edit_version_infos.begin() + n);
-    _apply_version_idx -= n;
-}
-
 bool TabletUpdates::check_rowset_id(const RowsetId& rowset_id) const {
     // TODO(cbl): optimization: check multiple rowset_ids at once
     {
@@ -1446,78 +1436,82 @@ bool TabletUpdates::check_rowset_id(const RowsetId& rowset_id) const {
     return false;
 }
 
-std::set<uint32_t> TabletUpdates::_active_rowsets() {
-    std::set<uint32_t> ret;
-    std::lock_guard rl(_lock);
-    for (const auto& edit_version_info : _edit_version_infos) {
-        ret.insert(edit_version_info->rowsets.begin(), edit_version_info->rowsets.end());
-    }
-    return ret;
-}
-
 void TabletUpdates::remove_expired_versions(int64_t expire_time) {
     if (_error) {
         LOG(WARNING) << Substitute("remove_expired_versions failed, tablet updates is in error state: tablet:$0 $1",
                                    _tablet.tablet_id(), _error_msg);
         return;
     }
-    /// Remove expired versions from memory.
-    std::vector<std::unique_ptr<EditVersionInfo>> expired_edit_version_infos;
-    _erase_expired_versions(expire_time, &expired_edit_version_infos);
 
-    if (!expired_edit_version_infos.empty()) {
-        int64_t tablet_id = 0;
+    size_t num_version_removed = 0;
+    size_t num_rowset_removed = 0;
+    uint64_t min_readable_version = 0;
+    // GC works that require locking
+    {
+        std::lock_guard l(_lock);
+        if (_edit_version_infos.empty()) {
+            LOG(WARNING) << "tablet deleted when erase_expired_versions tablet:" << _tablet.tablet_id();
+            return;
+        }
+
+        // only keep at most one version which is before expire_time
+        // also to prevent excessive memory usage of editversion array, limit edit version count to be less than
+        // config::tablet_max_versions
+        size_t keep_index_min = _apply_version_idx;
+        while (keep_index_min > 0) {
+            if (_edit_version_infos[keep_index_min]->creation_time <= expire_time ||
+                keep_index_min + config::tablet_max_versions < _edit_version_infos.size()) {
+                break;
+            }
+            keep_index_min--;
+        }
+        num_version_removed = keep_index_min;
+        if (num_version_removed > 0) {
+            _edit_version_infos.erase(_edit_version_infos.begin(), _edit_version_infos.begin() + num_version_removed);
+            _apply_version_idx -= num_version_removed;
+            // remove non-referenced rowsets
+            std::set<uint32_t> active_rowsets;
+            for (const auto& edit_version_info : _edit_version_infos) {
+                active_rowsets.insert(edit_version_info->rowsets.begin(), edit_version_info->rowsets.end());
+            }
+            std::lock_guard rl(_rowsets_lock);
+            std::lock_guard rsl(_rowset_stats_lock);
+            for (auto it = _rowsets.begin(); it != _rowsets.end();) {
+                if (active_rowsets.find(it->first) == active_rowsets.end()) {
+                    num_rowset_removed++;
+                    _rowset_stats.erase(it->first);
+                    (void)_unused_rowsets.blocking_put(std::move(it->second));
+                    it = _rowsets.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            min_readable_version = _edit_version_infos[0]->version.major();
+        }
+    }
+
+    // GC works that can be done outside of lock
+    if (num_version_removed > 0) {
         {
             std::unique_lock wrlock(_tablet.get_header_lock());
             _tablet.save_meta();
-            tablet_id = _tablet.tablet_id();
         }
-        std::set<uint32_t> unused_rid;
-        std::set<uint32_t> active_rid = _active_rowsets();
-        for (const auto& expired_edit_version_info : expired_edit_version_infos) {
-            VLOG(1) << "Removing expired version " << expired_edit_version_info->version.to_string() << " of tablet "
-                    << _tablet.tablet_id();
-            for (uint32_t expired_rid : expired_edit_version_info->rowsets) {
-                if (active_rid.count(expired_rid) == 0) {
-                    unused_rid.insert(expired_rid);
-                }
-            }
-        }
-        for (uint32_t id : unused_rid) {
-            std::lock_guard l(_rowsets_lock);
-            auto iter = _rowsets.find(id);
-            DCHECK(iter != _rowsets.end());
-            (void)_unused_rowsets.blocking_put(std::move(iter->second));
-            _rowsets.erase(iter);
-        }
-        for (uint32_t id : unused_rid) {
-            std::lock_guard l(_rowset_stats_lock);
-            _rowset_stats.erase(id);
-        }
-
-        /// Remove useless delete vectors.
-        auto max_expired_version = expired_edit_version_infos.back()->version.major();
+        auto tablet_id = _tablet.tablet_id();
+        // Remove useless delete vectors.
         auto meta_store = _tablet.data_dir()->get_meta();
-
-        size_t n_delvec_range = 0;
-        auto res = TabletMetaManager::list_del_vector(meta_store, tablet_id, max_expired_version + 1);
-        if (res.ok()) {
-            for (const auto& elem : *res) {
-                auto segment_id = elem.first;
-                auto end_version = elem.second;
-                (void)TabletMetaManager::delete_del_vector_range(meta_store, tablet_id, segment_id, 0, end_version);
-                VLOG(1) << "Removed delete vector tablet_id=" << tablet_id << " segment_id=" << segment_id
-                        << " start_version=0 end_version=" << end_version;
-            }
-            n_delvec_range = (*res).size();
+        auto res = TabletMetaManager::delete_del_vector_before_version(meta_store, tablet_id, min_readable_version);
+        size_t delvec_deleted = 0;
+        if (!res.ok()) {
+            LOG(WARNING) << "Fail to delete_del_vector_before_version tablet:" << tablet_id
+                         << " min_readable_version:" << min_readable_version << " msg:" << res.status();
         } else {
-            LOG(WARNING) << "Fail to list delete vector: " << res.status();
+            delvec_deleted = res.value();
         }
         LOG(INFO) << Substitute(
-                "remove_expired_versions $0 time:$1 max_expire_version:$2 deletes: #version:$3 #rowset:$4 "
-                "#delvecrange:$5",
-                _debug_version_info(true), expire_time, max_expired_version, expired_edit_version_infos.size(),
-                unused_rid.size(), n_delvec_range);
+                "remove_expired_versions $0 time:$1 min_readable_version:$2 deletes: #version:$3 #rowset:$4 "
+                "#delvec:$5",
+                _debug_version_info(true), expire_time, min_readable_version, num_version_removed, num_rowset_removed,
+                delvec_deleted);
     }
     _remove_unused_rowsets();
 }
@@ -1674,7 +1668,8 @@ Status TabletUpdates::compaction(MemTracker* mem_tracker) {
         total_rows_after_compaction = new_rows;
         total_bytes_after_compaction = new_bytes;
         if (total_bytes_after_compaction > compaction_result_bytes_threashold ||
-            total_rows_after_compaction > compaction_result_rows_threashold) {
+            total_rows_after_compaction > compaction_result_rows_threashold ||
+            info->inputs.size() >= config::max_update_compaction_num_singleton_deltas) {
             break;
         }
     }
@@ -2066,6 +2061,13 @@ Status TabletUpdates::link_from(Tablet* base_tablet, int64_t request_version) {
                      << " tablet:" << _tablet.tablet_id() << " base_tablet:" << base_tablet->tablet_id();
         return Status::InternalError("link_from: max_version < request version");
     }
+    if (this->max_version() >= request_version) {
+        LOG(WARNING) << "link_from skipped: max_version:" << this->max_version()
+                     << " >= alter_version:" << request_version << " tablet:" << _tablet.tablet_id()
+                     << " base_tablet:" << base_tablet->tablet_id();
+        _tablet.set_tablet_state(TabletState::TABLET_RUNNING);
+        return Status::OK();
+    }
     vector<RowsetSharedPtr> rowsets;
     EditVersion version;
     Status st = base_tablet->updates()->get_applied_rowsets(request_version, &rowsets, &version);
@@ -2160,6 +2162,13 @@ Status TabletUpdates::link_from(Tablet* base_tablet, int64_t request_version) {
     }
 
     std::unique_lock wrlock(_tablet.get_header_lock());
+    if (this->max_version() >= request_version) {
+        LOG(WARNING) << "link_from skipped: max_version:" << this->max_version()
+                     << " >= alter_version:" << request_version << " tablet:" << _tablet.tablet_id()
+                     << " base_tablet:" << base_tablet->tablet_id();
+        _tablet.set_tablet_state(TabletState::TABLET_RUNNING);
+        return Status::OK();
+    }
     st = kv_store->write_batch(&wb);
     if (!st.ok()) {
         LOG(WARNING) << "Fail to delete old meta and write new meta" << tablet_id << ": " << st;
@@ -2200,6 +2209,13 @@ Status TabletUpdates::convert_from(const std::shared_ptr<Tablet>& base_tablet, i
                      << " < alter_version:" << request_version << " tablet:" << _tablet.tablet_id()
                      << " base_tablet:" << base_tablet->tablet_id();
         return Status::InternalError("convert_from: max_version < request_version");
+    }
+    if (this->max_version() >= request_version) {
+        LOG(WARNING) << "convert_from skipped: max_version:" << this->max_version()
+                     << " >= alter_version:" << request_version << " tablet:" << _tablet.tablet_id()
+                     << " base_tablet:" << base_tablet->tablet_id();
+        _tablet.set_tablet_state(TabletState::TABLET_RUNNING);
+        return Status::OK();
     }
     std::vector<RowsetSharedPtr> src_rowsets;
     EditVersion version;
@@ -2324,6 +2340,13 @@ Status TabletUpdates::convert_from(const std::shared_ptr<Tablet>& base_tablet, i
     }
 
     std::unique_lock wrlock(_tablet.get_header_lock());
+    if (this->max_version() >= request_version) {
+        LOG(WARNING) << "convert_from skipped: max_version:" << this->max_version()
+                     << " >= alter_version:" << request_version << " tablet:" << _tablet.tablet_id()
+                     << " base_tablet:" << base_tablet->tablet_id();
+        _tablet.set_tablet_state(TabletState::TABLET_RUNNING);
+        return Status::OK();
+    }
     status = kv_store->write_batch(&wb);
     if (!status.ok()) {
         LOG(WARNING) << "Fail to delete old meta and write new meta" << tablet_id << ": " << status;
@@ -2395,14 +2418,24 @@ Status TabletUpdates::_convert_from_base_rowset(const std::shared_ptr<Tablet>& b
     return rowset_writer->flush();
 }
 
-void TabletUpdates::_remove_unused_rowsets() {
+void TabletUpdates::_remove_unused_rowsets(bool drop_tablet) {
     size_t removed = 0;
     std::vector<RowsetSharedPtr> skipped_rowsets;
     RowsetSharedPtr rowset;
     while (_unused_rowsets.try_get(&rowset) == 1) {
         if (rowset.use_count() > 1) {
-            LOG(WARNING) << "rowset " << rowset->rowset_id() << " still been referenced"
-                         << " tablet:" << _tablet.tablet_id();
+            if (drop_tablet) {
+                LOG(WARNING) << "rowset " << rowset->rowset_id() << " still been referenced"
+                             << " tablet:" << _tablet.tablet_id() << " rowset_id:" << rowset->rowset_id().id()
+                             << " use_count: " << rowset.use_count() << " refs_by_reader:" << rowset->refs_by_reader()
+                             << " version:" << rowset->version();
+            } else {
+                VLOG(1) << "rowset " << rowset->rowset_id() << " still been referenced"
+                        << " tablet:" << _tablet.tablet_id() << " rowset_id:" << rowset->rowset_id().id()
+                        << " use_count: " << rowset.use_count() << " refs_by_reader:" << rowset->refs_by_reader()
+                        << " version:" << rowset->version();
+            }
+
             skipped_rowsets.emplace_back(std::move(rowset));
             continue;
         }
@@ -2431,6 +2464,55 @@ void TabletUpdates::_remove_unused_rowsets() {
     }
     if (removed > 0) {
         LOG(INFO) << "_remove_unused_rowsets remove " << removed << " rowsets, tablet:" << _tablet.tablet_id();
+    }
+}
+
+Status TabletUpdates::check_and_remove_rowset() {
+    _remove_unused_rowsets(true);
+    if (!_unused_rowsets.empty()) {
+        std::string msg =
+                strings::Substitute("some rowsets of tablet: $0 are still been referenced", _tablet.tablet_id());
+        LOG(WARNING) << msg;
+        return Status::InternalError(msg);
+    }
+    return Status::OK();
+}
+
+void TabletUpdates::get_basic_info_extra(TabletBasicInfo& info) {
+    vector<uint32_t> rowsets;
+    {
+        std::lock_guard rl(_lock);
+        if (_edit_version_infos.empty()) {
+            LOG(WARNING) << "tablet delete when get_tablet_info_extra tablet:" << _tablet.tablet_id();
+            return;
+        }
+        info.num_version = _edit_version_infos.size();
+        info.min_version = _edit_version_infos[0]->version.major();
+        auto& v = _edit_version_infos[_edit_version_infos.size() - 1];
+        info.max_version = v->version.major();
+        info.num_rowset = v->rowsets.size();
+        rowsets = v->rowsets;
+    }
+    int64_t total_row = 0;
+    int64_t total_size = 0;
+    {
+        std::lock_guard lg(_rowset_stats_lock);
+        for (uint32_t rowsetid : rowsets) {
+            auto itr = _rowset_stats.find(rowsetid);
+            if (itr != _rowset_stats.end()) {
+                // TODO(cbl): also report num deletes
+                total_row += itr->second->num_rows;
+                total_size += itr->second->byte_size;
+            }
+        }
+    }
+    info.num_row = total_row;
+    info.data_size = total_size;
+    auto& index_cache = StorageEngine::instance()->update_manager()->index_cache();
+    auto index_entry = index_cache.get(_tablet.tablet_id());
+    if (index_entry != nullptr) {
+        info.index_mem = index_entry->size();
+        index_cache.release(index_entry);
     }
 }
 
@@ -2698,7 +2780,8 @@ Status TabletUpdates::clear_meta() {
     // TODO: tablet is already marked to be deleted, so maybe don't need to clear unused rowsets here
     _remove_unused_rowsets();
     if (_unused_rowsets.get_size() != 0) {
-        return Status::InternalError("some unused rowset cannot be removed");
+        LOG(WARNING) << "_unused_rowsets is not empty, size: " << _unused_rowsets.get_size()
+                     << " version_info: " << _debug_version_info(false);
     }
 
     WriteBatch wb;
@@ -2926,6 +3009,18 @@ Status TabletUpdates::get_rowsets_for_incremental_snapshot(const std::vector<int
             LOG(INFO) << msg;
             return Status::NotFound(msg);
         }
+        size_t num_rowset_full_clone = _edit_version_infos.back()->rowsets.size();
+        // TODO: make better estimates about incremental / full clone costs
+        // currently only consider number of rowsets, should also consider number of actual files and data size to
+        // reflect the actual cost
+        if (versions.size() >= config::tablet_max_versions || versions.size() >= num_rowset_full_clone * 20) {
+            string msg = strings::Substitute(
+                    "get_rowsets_for_snapshot: too many rowsets for incremental clone "
+                    "#rowset:$0 #rowset_for_full_clone:$1 switch to full clone $2",
+                    versions.size(), num_rowset_full_clone, _debug_version_info(false));
+            LOG(INFO) << msg;
+            return Status::OK();
+        }
         rowsetids.reserve(versions.size());
         // compare two lists to find matching versions and record rowsetid
         size_t versions_index = 0;
@@ -2970,6 +3065,16 @@ Status TabletUpdates::get_rowsets_for_incremental_snapshot(const std::vector<int
                                      _debug_version_info(true), JoinInts(missing_version_ranges, ","),
                                      JoinInts(versions, ","));
     return Status::OK();
+}
+
+void TabletUpdates::to_rowset_meta_pb(const std::vector<RowsetMetaSharedPtr>& rowset_metas,
+                                      std::vector<RowsetMetaPB>& rowset_metas_pb) {
+    std::lock_guard wl(_lock);
+    rowset_metas_pb.reserve(rowset_metas.size());
+    for (const auto& rowset_meta : rowset_metas) {
+        RowsetMetaPB& meta_pb = rowset_metas_pb.emplace_back();
+        rowset_meta->to_rowset_pb(&meta_pb);
+    }
 }
 
 } // namespace starrocks

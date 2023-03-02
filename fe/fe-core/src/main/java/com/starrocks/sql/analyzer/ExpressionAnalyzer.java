@@ -154,7 +154,7 @@ public class ExpressionAnalyzer {
                     throw new SemanticException(e.getMessage());
                 }
             } else {
-                node.setType(new ArrayType(Type.NULL));
+                node.setType(Type.ARRAY_NULL);
             }
             return null;
         }
@@ -388,7 +388,9 @@ public class ExpressionAnalyzer {
                         throw new ParsingException(
                                 funcOpName + " requires second parameter must be greater than 0");
                     }
-                    node.addChild(new StringLiteral(node.getTimeUnitIdent().toLowerCase()));
+                    if (node.getChildren().size() == 2) {
+                        node.addChild(new StringLiteral(node.getTimeUnitIdent().toLowerCase()));
+                    }
                 } else {
                     node.setChild(1, TypeManager.addCastExpr(node.getChild(1), Type.DATETIME));
                     funcOpName = String.format("%sS_%s", node.getTimeUnitIdent(), "diff");
@@ -496,8 +498,8 @@ public class ExpressionAnalyzer {
 
             for (Expr expr : node.getChildren()) {
                 if (expr.getType().isOnlyMetricType() ||
-                        (expr.getType() instanceof ArrayType && !(node instanceof IsNullPredicate))) {
-                    throw new SemanticException("HLL, BITMAP, PERCENTILE and ARRAY type couldn't as Predicate");
+                        (expr.getType().isComplexType() && !(node instanceof IsNullPredicate))) {
+                    throw new SemanticException("HLL, BITMAP, PERCENTILE and ARRAY, MAP, STRUCT type couldn't as Predicate");
                 }
             }
         }

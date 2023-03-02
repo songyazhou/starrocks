@@ -1,11 +1,13 @@
 # DROP USER
 
-## description
+## Description
 
-### Syntax
+Deletes a specified user identity.
+
+## Syntax
 
 ```sql
- DROP USER 'user_identity'
+ DROP USER '<user_identity>'
 
 `user_identity`:
 
@@ -13,12 +15,10 @@
 user@['domain']
 ```
 
- Delete a specified user identity
+## Examples
 
-## example
+Delete user jack@'192.%'.
 
-1. Delete user jack@'192.%'
-
-    ```sql
-    DROP USER 'jack'@'192.%'
-    ```
+```sql
+DROP USER 'jack'@'192.%'
+```

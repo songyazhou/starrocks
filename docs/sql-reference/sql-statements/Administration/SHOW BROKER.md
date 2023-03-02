@@ -1,13 +1,13 @@
 # SHOW BROKER
 
-## description
+## Description
 
 This statement is used to view broker that currently exists.
 
 Syntax:
 
 ```sql
-SHOW BROKER;
+SHOW BROKER
 ```
 
 Note:

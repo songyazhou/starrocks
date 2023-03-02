@@ -1,6 +1,7 @@
 // This file is licensed under the Elastic License 2.0. Copyright 2021-present, StarRocks Limited.
 package com.starrocks.sql.analyzer;
 
+import com.starrocks.analysis.CompoundPredicate;
 import com.starrocks.analysis.StatementBase;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.SqlModeHelper;
@@ -335,10 +336,19 @@ public class AnalyzeSingleTest {
         Assert.assertEquals("'\"'", AST2SQL.toString(statement.getQueryRelation().getOutputExpression().get(0)));
         statement = (QueryStatement) analyzeSuccess("select \"7\\\"\\\"\"");
         Assert.assertEquals("'7\"\"'", AST2SQL.toString(statement.getQueryRelation().getOutputExpression().get(0)));
-        statement = (QueryStatement) analyzeWithoutTestView("select '7'''");
-        Assert.assertEquals("'7''", AST2SQL.toString(statement.getQueryRelation().getOutputExpression().get(0)));
+        statement = (QueryStatement) analyzeSuccess("select '7'''");
+        Assert.assertEquals("'7\\''", AST2SQL.toString(statement.getQueryRelation().getOutputExpression().get(0)));
         statement = (QueryStatement) analyzeSuccess("SELECT '7\\'\\''");
-        Assert.assertEquals("'7'''", AST2SQL.toString(statement.getQueryRelation().getOutputExpression().get(0)));
+        Assert.assertEquals("'7\\'\\''", AST2SQL.toString(statement.getQueryRelation().getOutputExpression().get(0)));
+        statement = (QueryStatement) analyzeSuccess("select \"Hello ' World ' !\"");
+        Assert.assertEquals("'Hello \\' World \\' !'",
+                AST2SQL.toString(statement.getQueryRelation().getOutputExpression().get(0)));
+        statement = (QueryStatement) analyzeSuccess("select 'Hello \" World \" !'");
+        Assert.assertEquals("'Hello \" World \" !'",
+                AST2SQL.toString(statement.getQueryRelation().getOutputExpression().get(0)));
+
+        statement = (QueryStatement) analyzeSuccess("select * from (VALUES('20221019','5f8e53afaa68a90001597158'," +
+                "'A\\'FAVOR ',2),('20221019','62028e206ca09d0001cdf1a1','----',39)) t");
 
         analyzeSuccess("select @@`sql_mode`");
     }
@@ -425,6 +435,19 @@ public class AnalyzeSingleTest {
     public void testDual() {
         analyzeSuccess("select 1,2,3 from dual");
         analyzeFail("select * from dual", "No tables used");
+    }
+
+    @Test
+    public void testLogicalBinaryPredicate() {
+        QueryStatement queryStatement = (QueryStatement) analyzeSuccess("select * from test.t0 where v1 = 1 && v2 = 2");
+        SelectRelation selectRelation = (SelectRelation) queryStatement.getQueryRelation();
+        Assert.assertTrue(selectRelation.getPredicate() instanceof CompoundPredicate);
+        Assert.assertEquals(((CompoundPredicate) selectRelation.getPredicate()).getOp(), CompoundPredicate.Operator.AND);
+
+        queryStatement = (QueryStatement) analyzeSuccess("select * from test.t0 where v1 = 1 || v2 = 2");
+        selectRelation = (SelectRelation) queryStatement.getQueryRelation();
+        Assert.assertTrue(selectRelation.getPredicate() instanceof CompoundPredicate);
+        Assert.assertEquals(((CompoundPredicate) selectRelation.getPredicate()).getOp(), CompoundPredicate.Operator.OR);
     }
 
     @Test
@@ -520,6 +543,10 @@ public class AnalyzeSingleTest {
         list = SqlParser.parse("select array_contains([], cast('2021-01--1 08:00:00' as datetime)) --x;x\n from t0", 0);
         Assert.assertEquals(1, list.size());
         Assert.assertTrue(list.get(0) instanceof QueryStatement);
+
+        list = SqlParser.parse("select '\\'', ';';", 0);
+        Assert.assertEquals(1, list.size());
+        Assert.assertTrue(list.get(0) instanceof QueryStatement);
     }
 
     @Test
@@ -538,5 +565,15 @@ public class AnalyzeSingleTest {
         statementBase = analyzeSuccess("select /*+ SET_VAR(broadcast_row_limit=1) */ * from t0");
         selectRelation = (SelectRelation) ((QueryStatement) statementBase).getQueryRelation();
         Assert.assertEquals("1", selectRelation.getSelectList().getOptHints().get("broadcast_row_limit"));
+    }
+
+    @Test
+    public void testRemoveComment() {
+        analyzeSuccess("select * from-- comment\n" + "test.t0");
+        analyzeSuccess("select * from/*comment*/test.t0");
+
+        analyzeFail("select * fro-- comment\nm test.t0");
+        analyzeFail("select * fro/*comment*/m test.t0");
+
     }
 }

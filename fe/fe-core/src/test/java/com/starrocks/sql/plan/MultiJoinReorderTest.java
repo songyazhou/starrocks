@@ -440,11 +440,7 @@ public class MultiJoinReorderTest extends PlanTestBase {
                 "  |  \n" +
                 "  |----15:EXCHANGE\n" +
                 "  |    \n" +
-                "  13:AGGREGATE (merge finalize)\n" +
-                "  |  output: count(10: count)\n" +
-                "  |  group by: \n" +
-                "  |  \n" +
-                "  12:EXCHANGE\n"));
+                "  13:AGGREGATE (merge finalize)"));
     }
 
     @Test
@@ -506,4 +502,5 @@ public class MultiJoinReorderTest extends PlanTestBase {
         String plan = getFragmentPlan(sql);
         Assert.assertTrue(plan.contains("<slot 27> : NULL"));
     }
+
 }

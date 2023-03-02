@@ -68,6 +68,9 @@ public class MasterOpExecutor {
         // set thriftTimeoutMs to query_timeout + thrift_rpc_timeout_ms
         // so that we can return an execution timeout instead of a network timeout
         this.thriftTimeoutMs = ctx.getSessionVariable().getQueryTimeoutS() * 1000 + Config.thrift_rpc_timeout_ms;
+        if (this.thriftTimeoutMs < 0) {
+            this.thriftTimeoutMs = ctx.getSessionVariable().getQueryTimeoutS() * 1000;
+        }
         this.parsedStmt = parsedStmt;
     }
 
@@ -116,6 +119,7 @@ public class MasterOpExecutor {
         params.setSql(originStmt.originStmt);
         params.setStmtIdx(originStmt.idx);
         params.setUser(ctx.getQualifiedUser());
+        params.setCatalog(ctx.getCurrentCatalog());
         params.setDb(ctx.getDatabase());
         params.setSqlMode(ctx.getSessionVariable().getSqlMode());
         params.setUser_ip(ctx.getRemoteIP());

@@ -303,6 +303,10 @@ struct TSchemaScanNode {
   9: optional i64 thread_id
   10: optional string user_ip   // deprecated
   11: optional Types.TUserIdentity current_user_ident   // to replace the user and user_ip
+  12: optional i64 table_id
+  13: optional i64 partition_id
+  14: optional i64 tablet_id
+  15: optional i64 txn_id
 }
 
 struct TOlapScanNode {
@@ -318,6 +322,10 @@ struct TOlapScanNode {
   23: optional map<i32, i32> dict_string_id_to_int_ids
   // which columns only be used to filter data in the stage of scan data
   24: optional list<string> unused_output_column_name
+
+  25: optional bool sorted_by_keys_per_tablet = false
+
+  26: optional list<Exprs.TExpr> bucket_exprs
 }
 
 struct TJDBCScanNode {

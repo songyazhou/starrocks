@@ -4,6 +4,7 @@ package com.starrocks.sql.plan;
 
 import com.starrocks.common.FeConstants;
 import com.starrocks.qe.SessionVariable;
+import com.starrocks.utframe.UtFrameUtils;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -257,10 +258,10 @@ public class SetTest extends PlanTestBase {
     public void testUnionNullConstant() throws Exception {
         String sql = "select count(*) from (select null as c1 union all select null as c1) t group by t.c1";
         String plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("  0:UNION\n" +
+        assertContains(plan, "  0:UNION\n" +
                 "  |  child exprs:\n" +
-                "  |      [2, NULL_TYPE, true]\n" +
-                "  |      [4, NULL_TYPE, true]"));
+                "  |      [2, BOOLEAN, true]\n" +
+                "  |      [4, BOOLEAN, true]");
 
         sql = "select count(*) from (select 1 as c1 union all select null as c1) t group by t.c1";
         plan = getVerboseExplain(sql);
@@ -471,16 +472,16 @@ public class SetTest extends PlanTestBase {
                 "      )\n" +
                 "  ) t;";
         String plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("8:AGGREGATE (update serialize)\n" +
+        assertContains(plan, "8:AGGREGATE (update serialize)\n" +
                 "  |  STREAMING\n" +
                 "  |  group by: [9: day, TINYINT, true]\n" +
-                "  |  cardinality: 0\n" +
+                "  |  cardinality: 1\n" +
                 "  |  \n" +
                 "  0:UNION\n" +
                 "  |  child exprs:\n" +
                 "  |      [4, TINYINT, true]\n" +
                 "  |      [8, TINYINT, true]\n" +
-                "  |  pass-through-operands: all"));
+                "  |  pass-through-operands: all");
     }
 
     @Test
@@ -517,5 +518,11 @@ public class SetTest extends PlanTestBase {
                 "  |  order by: <slot 8> 8: expr ASC"));
         Assert.assertTrue(plan.contains("  2:Project\n" +
                 "  |  <slot 4> : 1: v1 + 2: v2"));
+    }
+
+    @Test
+    public void testSetExpression() throws Exception {
+        UtFrameUtils.parseAndAnalyzeStmt("set exec_mem_limit = 2 * 4", connectContext);
+        UtFrameUtils.parseAndAnalyzeStmt("set exec_mem_limit = 2 + 4 - 1 * 3", connectContext);
     }
 }

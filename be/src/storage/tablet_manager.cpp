@@ -32,6 +32,7 @@ DIAGNOSTIC_POP
 #include <memory>
 
 #include "common/config.h"
+#include "exec/vectorized/schema_scanner/schema_be_tablets_scanner.h"
 #include "fs/fs.h"
 #include "fs/fs_util.h"
 #include "runtime/current_thread.h"
@@ -591,15 +592,16 @@ bool TabletManager::get_next_batch_tablets(size_t batch_size, std::vector<Tablet
     }
 }
 
-TabletSharedPtr TabletManager::find_best_tablet_to_compaction(CompactionType compaction_type, DataDir* data_dir) {
+TabletSharedPtr TabletManager::find_best_tablet_to_compaction(CompactionType compaction_type, DataDir* data_dir,
+                                                              std::pair<int32_t, int32_t> tablet_shards_range) {
     int64_t now_ms = UnixMillis();
     const std::string& compaction_type_str = compaction_type == CompactionType::BASE_COMPACTION ? "base" : "cumulative";
     // only do compaction if compaction #rowset > 1
     uint32_t highest_score = 1;
     TabletSharedPtr best_tablet;
-    for (const auto& tablets_shard : _tablets_shards) {
-        std::shared_lock rlock(tablets_shard.lock);
-        for (auto [tablet_id, tablet_ptr] : tablets_shard.tablet_map) {
+    for (int32_t i = tablet_shards_range.first; i < tablet_shards_range.second; i++) {
+        std::shared_lock rlock(_tablets_shards[i].lock);
+        for (auto [tablet_id, tablet_ptr] : _tablets_shards[i].tablet_map) {
             if (tablet_ptr->keys_type() == PRIMARY_KEYS) {
                 continue;
             }
@@ -938,6 +940,15 @@ Status TabletManager::start_trash_sweep() {
         // if there is another thread has reference to the tablet, and if so, does not remove the tablet for now.
         if (tablet.use_count() > 2) {
             continue;
+        }
+
+        if (tablet->updates() != nullptr) {
+            Status st = tablet->updates()->check_and_remove_rowset();
+            if (!st.ok()) {
+                LOG(WARNING) << "there are some rowsets still been referenced, drop tablet: " << tablet->tablet_id()
+                             << " later";
+                continue;
+            }
         }
 
         bool remove_meta = false;
@@ -1376,6 +1387,56 @@ void TabletManager::_remove_tablet_from_partition(const Tablet& tablet) {
     _partition_tablet_map[tablet.partition_id()].erase(tablet.get_tablet_info());
     if (_partition_tablet_map[tablet.partition_id()].empty()) {
         _partition_tablet_map.erase(tablet.partition_id());
+    }
+}
+
+void TabletManager::get_tablets_basic_infos(int64_t table_id, int64_t partition_id, int64_t tablet_id,
+                                            std::vector<TabletBasicInfo>& tablet_infos) {
+    if (tablet_id != -1) {
+        auto tablet = get_tablet(tablet_id, true, nullptr);
+        if (tablet) {
+            auto& info = tablet_infos.emplace_back();
+            tablet->get_basic_info(info);
+        }
+    } else if (partition_id != -1) {
+        vector<int64_t> tablet_ids;
+        {
+            std::shared_lock rlock(_partition_tablet_map_lock);
+            auto search = _partition_tablet_map.find(partition_id);
+            if (search != _partition_tablet_map.end()) {
+                for (auto tablet_id : search->second) {
+                    tablet_ids.push_back(tablet_id.tablet_id);
+                }
+            }
+        }
+        for (int64_t tablet_id : tablet_ids) {
+            auto tablet = get_tablet(tablet_id, true, nullptr);
+            if (tablet) {
+                auto& info = tablet_infos.emplace_back();
+                tablet->get_basic_info(info);
+            }
+        }
+    } else {
+        for (auto& shard : _tablets_shards) {
+            std::shared_lock rlock(shard.lock);
+            for (auto& itr : shard.tablet_map) {
+                auto& tablet = itr.second;
+                if (table_id == -1 || tablet->tablet_meta()->table_id() == table_id) {
+                    auto& info = tablet_infos.emplace_back();
+                    tablet->get_basic_info(info);
+                }
+            }
+        }
+        // order by table_id, partition_id, tablet_id by default
+        std::sort(tablet_infos.begin(), tablet_infos.end(), [](const TabletBasicInfo& a, const TabletBasicInfo& b) {
+            if (a.partition_id == b.partition_id) {
+                return a.tablet_id < b.tablet_id;
+            }
+            if (a.table_id == b.table_id) {
+                return a.partition_id < b.partition_id;
+            }
+            return a.table_id < b.table_id;
+        });
     }
 }
 

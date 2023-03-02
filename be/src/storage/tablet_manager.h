@@ -46,6 +46,7 @@ namespace starrocks {
 
 class Tablet;
 class DataDir;
+class TabletBasicInfo;
 
 enum TabletDropFlag {
     kMoveFilesToTrash = 0,
@@ -74,7 +75,8 @@ public:
 
     Status drop_tablets_on_error_root_path(const std::vector<TabletInfo>& tablet_info_vec);
 
-    TabletSharedPtr find_best_tablet_to_compaction(CompactionType compaction_type, DataDir* data_dir);
+    TabletSharedPtr find_best_tablet_to_compaction(CompactionType compaction_type, DataDir* data_dir,
+                                                   std::pair<int32_t, int32_t> tablet_shards_range);
 
     TabletSharedPtr find_best_tablet_to_do_update_compaction(DataDir* data_dir);
 
@@ -148,6 +150,9 @@ public:
 
     // return true if all tablets visited
     bool get_next_batch_tablets(size_t batch_size, std::vector<TabletSharedPtr>* tablets);
+
+    void get_tablets_basic_infos(int64_t table_id, int64_t partition_id, int64_t tablet_id,
+                                 std::vector<TabletBasicInfo>& tablet_infos);
 
 private:
     using TabletMap = std::unordered_map<int64_t, TabletSharedPtr>;

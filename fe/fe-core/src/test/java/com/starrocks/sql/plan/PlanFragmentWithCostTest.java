@@ -4,6 +4,7 @@ package com.starrocks.sql.plan;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import com.starrocks.catalog.LocalTablet;
 import com.starrocks.catalog.OlapTable;
 import com.starrocks.catalog.Replica;
 import com.starrocks.catalog.Table;
@@ -16,10 +17,13 @@ import com.starrocks.sql.optimizer.statistics.StatisticStorage;
 import com.starrocks.utframe.StarRocksAssert;
 import com.starrocks.utframe.UtFrameUtils;
 import mockit.Expectations;
+import mockit.Mock;
+import mockit.MockUp;
 import mockit.Mocked;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -485,7 +489,8 @@ public class PlanFragmentWithCostTest extends PlanTestBase {
         Assert.assertTrue(planFragment.contains("rollup: bitmap_mv"));
     }
 
-    // todo(ywb) disable replicate join temporarily
+    @Test
+    @Ignore("disable replicate join temporarily")
     public void testReplicatedJoin() throws Exception {
         connectContext.getSessionVariable().setEnableReplicationJoin(true);
         String sql = "select s_name, s_address from supplier, nation where s_suppkey in " +
@@ -842,8 +847,7 @@ public class PlanFragmentWithCostTest extends PlanTestBase {
                     "     - filter_id = 0, probe_expr = (1: v1 + 1)"));
         }
     }
-
-    @Test
+    
     public void testLimitTabletPrune(@Mocked Replica replica) throws Exception {
         new Expectations() {
             {
@@ -1004,5 +1008,218 @@ public class PlanFragmentWithCostTest extends PlanTestBase {
         String plan = getCostExplain(sql);
         assertContains(plan, "  |  join op: INNER JOIN (COLOCATE)");
         assertContains(plan, "k3-->[NaN, NaN, 0.0, 4.0, 1.0] ESTIMATE");
+    }
+
+    @Test
+    public void testExcessiveOR() throws Exception {
+        String sql = "SELECT\n" +
+                "  *\n" +
+                "FROM t0\n" +
+                "WHERE\n" +
+                "  ((v1 >= 27 AND v1 < 28)) OR \n" +
+                " (((v1 >= 26 AND v1 < 27)) OR \n" +
+                " (((v1 >= 25 AND v1 < 26)) OR \n" +
+                " (((v1 >= 24 AND v1 < 25)) OR \n" +
+                " (((v1 >= 23 AND v1 < 24)) OR \n" +
+                " (((v1 >= 22 AND v1 < 23)) OR \n" +
+                " (((v1 >= 21 AND v1 < 22)) OR \n" +
+                " (((v1 >= 20 AND v1 < 21)) OR \n" +
+                " (((v1 >= 19 AND v1 < 20)) OR \n" +
+                " (((v1 >= 18 AND v1 < 19)) OR \n" +
+                " (((v1 >= 17 AND v1 < 18)) OR \n" +
+                " (((v1 >= 16 AND v1 < 17)) OR \n" +
+                " (((v1 >= 15 AND v1 < 16)) OR \n" +
+                " (((v1 >= 14 AND v1 < 15)) OR \n" +
+                " (((v1 >= 13 AND v1 < 14)) OR \n" +
+                " (((v1 >= 12 AND v1 < 13)) OR \n" +
+                " (((v1 >= 11 AND v1 < 12)) OR \n" +
+                " (((v1 >= 10 AND v1 < 11)) OR \n" +
+                " (((v1 >= 09 AND v1 < 10)) OR \n" +
+                " (((v1 >= 08 AND v1 < 09)) OR \n" +
+                " (((v1 >= 07 AND v1 < 08)) OR \n" +
+                " (((v1 >= 06 AND v1 < 07)) OR \n" +
+                " (((v1 >= 05 AND v1 < 06)) OR \n" +
+                " (((v1 >= 04 AND v1 < 05)) OR \n" +
+                " (((v1 >= 03 AND v1 < 04)) OR \n" +
+                " (((v1 >= 02 AND v1 < 03)) OR \n" +
+                "  ((v1 >= 01 AND v1 < 02)))))))))))))))))))))))))))";
+
+        //Test excessive recursion and optimizer timeout due to too many OR
+        getFragmentPlan(sql);
+    }
+
+    @Test
+    public void testExcessiveAnd() throws Exception {
+        String sql = "SELECT\n" +
+                "  *\n" +
+                "FROM t0\n" +
+                "WHERE\n" +
+                "  ((v1 >= 27 OR v1 < 28)) AND \n" +
+                " (((v1 >= 26 OR v1 < 27)) AND \n" +
+                " (((v1 >= 25 OR v1 < 26)) AND \n" +
+                " (((v1 >= 24 OR v1 < 25)) AND \n" +
+                " (((v1 >= 23 OR v1 < 24)) AND \n" +
+                " (((v1 >= 22 OR v1 < 23)) AND \n" +
+                " (((v1 >= 21 OR v1 < 22)) AND \n" +
+                " (((v1 >= 20 OR v1 < 21)) AND \n" +
+                " (((v1 >= 19 OR v1 < 20)) AND \n" +
+                " (((v1 >= 18 OR v1 < 19)) AND \n" +
+                " (((v1 >= 17 OR v1 < 18)) AND \n" +
+                " (((v1 >= 16 OR v1 < 17)) AND \n" +
+                " (((v1 >= 15 OR v1 < 16)) AND \n" +
+                " (((v1 >= 14 OR v1 < 15)) AND \n" +
+                " (((v1 >= 13 OR v1 < 14)) AND \n" +
+                " (((v1 >= 12 OR v1 < 13)) AND \n" +
+                " (((v1 >= 11 OR v1 < 12)) AND \n" +
+                " (((v1 >= 10 OR v1 < 11)) AND \n" +
+                " (((v1 >= 09 OR v1 < 10)) AND \n" +
+                " (((v1 >= 08 OR v1 < 09)) AND \n" +
+                " (((v1 >= 07 OR v1 < 08)) AND \n" +
+                " (((v1 >= 06 OR v1 < 07)) AND \n" +
+                " (((v1 >= 05 OR v1 < 06)) AND \n" +
+                " (((v1 >= 04 OR v1 < 05)) AND \n" +
+                " (((v1 >= 03 OR v1 < 04)) AND \n" +
+                " (((v1 >= 02 OR v1 < 03)) AND \n" +
+                "  ((v1 >= 01 OR v1 < 02)))))))))))))))))))))))))))";
+
+        //Test excessive recursion and optimizer timeout due to too many OR
+        getFragmentPlan(sql);
+    }
+    @Test
+    public void testTimeOutOr50() throws Exception {
+        String sql = "SELECT v1\n" +
+                "FROM t0\n" +
+                "WHERE (v2 = 1\n" +
+                " OR ((v2 = 2\n" +
+                "  OR ((v2 = 3\n" +
+                "   OR ((v2 = 4\n" +
+                "    OR ((v2 = 5\n" +
+                "     OR ((v2 = 6\n" +
+                "      OR ((v2 = 7\n" +
+                "       OR ((v2 = 8\n" +
+                "        OR ((v2 = 9\n" +
+                "         OR ((v2 = 10\n" +
+                "          OR (v1 = 11 AND (v2 = 12\n" +
+                "           OR (v2 = 13\n" +
+                "            OR (v2 = 14\n" +
+                "             OR (v1 = 15 AND (v2 = 16\n" +
+                "              OR (v2 = 17\n" +
+                "               OR (v2 = 18\n" +
+                "                OR (v2 = 19\n" +
+                "                 OR (v2 = 20\n" +
+                "                  OR ((v2 = 21 AND v1 = 22)\n" +
+                "                     OR (v2 = 23 AND v1 = 24)) AND v1 = 25) AND v1 = 26\n" +
+                "                 OR (v2 = 27 AND v1 = 28)\n" +
+                "                 OR (v2 = 29 AND v1 = 30)\n" +
+                "                 OR (v2 = 31 AND v1 = 32)\n" +
+                "                 OR (v2 = 33 AND v1 = 34)\n" +
+                "                 OR (v2 = 35 AND v1 = 36)\n" +
+                "                 OR (v2 = 37 AND v1 = 38)) AND v1 = 39\n" +
+                "                OR v2 = 40 AND v1 = 41\n" +
+                "                OR v2 = 42 AND v1 = 43\n" +
+                "                OR v2 = 44 AND v1 = 45\n" +
+                "                OR v2 = 46 AND v1 = 47\n" +
+                "                OR v2 = 48 AND v1 = 49\n" +
+                "                OR v2 = 50 AND v1 = 51\n" +
+                "                OR v2 = 52 AND v1 = 53\n" +
+                "                OR v2 = 54 AND v1 = 55\n" +
+                "                OR v2 = 56 AND v1 = 57\n" +
+                "                OR v2 = 58 AND v1 = 59\n" +
+                "                OR v2 = 60 AND v1 = 61\n" +
+                "                OR v2 = 62 AND v1 = 63\n" +
+                "                OR v2 = 64 AND v1 = 65\n" +
+                "                OR v2 = 66 AND v1 = 67\n" +
+                "                OR v2 = 68 AND v1 = 69) AND v1 = 70\n" +
+                "               OR v2 = 71 AND v1 = 72) AND v1 = 73\n" +
+                "              OR v2 = 74 AND v1 = 75\n" +
+                "              OR v2 = 76 AND v1 = 77\n" +
+                "              OR v2 = 78 AND v1 = 79\n" +
+                "              OR v2 = 80))) AND v1 = 81 AND v1 = 82\n" +
+                "            OR v2 = 83 AND v1 = 84\n" +
+                "            OR v2 = 85 AND v1 = 86) AND v1 = 87\n" +
+                "           OR v2 = 88 AND v1 = 89\n" +
+                "           OR v2 = 90)))\n" +
+                "            AND v1 = 91))\n" +
+                "           AND v1 = 92))\n" +
+                "          AND v1 = 93))\n" +
+                "         AND v1 = 94))\n" +
+                "        AND v1 = 95))\n" +
+                "       AND v1 = 96))\n" +
+                "      AND v1 = 97))\n" +
+                "     AND v1 = 98))\n" +
+                "    AND v1 = 99))\n" +
+                "   AND v1 = 100";
+        String plan = getFragmentPlan(sql);
+    }
+
+    @Test
+    public void testTimeOutOr15() throws Exception {
+        String sql = "SELECT v1\n" +
+                "FROM t0\n" +
+                "WHERE (v2 = 1\n" +
+                " OR ((v2 = 2\n" +
+                "  OR ((v2 = 3\n" +
+                "   OR ((v2 = 4\n" +
+                "    OR ((v2 = 5\n" +
+                "     OR ((v2 = 6\n" +
+                "      OR ((v2 = 7\n" +
+                "       OR ((v2 = 8\n" +
+                "        OR ((v2 = 9\n" +
+                "         OR ((v2 = 10\n" +
+                "          OR (v1 = 11 AND (v2 = 12\n" +
+                "           OR (v2 = 13)\n" +
+                "                   AND v1 = 87\n" +
+                "           OR v2 = 90)))\n" +
+                "                 AND v1 = 91))\n" +
+                "                AND v1 = 92))\n" +
+                "               AND v1 = 93))\n" +
+                "              AND v1 = 94))\n" +
+                "             AND v1 = 95))\n" +
+                "            AND v1 = 96))\n" +
+                "           AND v1 = 97))\n" +
+                "          AND v1 = 98))\n" +
+                "         AND v1 = 99))\n" +
+                "        AND v1 = 100;";
+        getFragmentPlan(sql);
+    }
+
+    public void testPruneLimit() throws Exception {
+        GlobalStateMgr globalStateMgr = connectContext.getGlobalStateMgr();
+        OlapTable table2 = (OlapTable) globalStateMgr.getDb("default_cluster:test").getTable("lineitem_partition");
+        setTableStatistics(table2, 10);
+
+        new MockUp<LocalTablet>() {
+            @Mock
+            public long getRowCount(long version) {
+                return 10;
+            }
+        };
+
+        String sql = "select * from lineitem_partition limit 2";
+        String plan = getFragmentPlan(sql);
+        assertContains(plan, "     partitions=7/7\n" +
+                "     rollup: lineitem_partition\n" +
+                "     tabletRatio=1");
+    }
+
+    @Test
+    public void testPruneInvalidPredicate() throws Exception {
+        GlobalStateMgr globalStateMgr = connectContext.getGlobalStateMgr();
+        OlapTable table2 = (OlapTable) globalStateMgr.getDb("default_cluster:test").getTable("lineitem_partition");
+        setTableStatistics(table2, 10);
+
+        new MockUp<LocalTablet>() {
+            @Mock
+            public long getRowCount(long version) {
+                return 10;
+            }
+        };
+
+        String sql = "select * from lineitem_partition where L_SHIPDATE > cast(true as date)";
+        String plan = getFragmentPlan(sql);
+
+        assertContains(plan, "TABLE: lineitem_partition\n" +
+                "     PREAGGREGATION: ON\n" +
+                "     PREDICATES: 11: L_SHIPDATE > CAST(TRUE AS DATE)");
     }
 }

@@ -45,23 +45,23 @@ Compared with traditional primary keys, sort keys in StarRocks have the followin
 
 ## Duplicate Key model
 
-The Duplicate Key model is the default data model at the creation of tables in StarRocks.
+The Duplicate Key model is the default model in StarRocks. If you did not specify a model when you create a table, a Duplicate Key table is created by default.
 
-When you create a table that uses the Duplicate Key model, you can define a sort key for that table. If the filter conditions for queries contain the sort key columns, StarRocks can quickly filter the data of the table to accelerate the queries. The Duplicate Key model allows you to append new data to the table. However, it does not allow you to modify the existing data in the table.
+When you create a Duplicate Key table, you can define a sort key for that table. If the filter conditions contain the sort key columns, StarRocks can quickly filter data from the table to accelerate queries. The Duplicate Key model allows you to append new data to the table. However, it does not allow you to modify existing data in the table.
 
 ### Scenarios
 
 The Duplicate Key model is suitable for the following scenarios:
 
 - Analyze raw data, such as raw logs and raw operation records.
-- Query data by using various methods without the need to be limited to preaggregate methods.
-- Load log data or time series data. New data is written in append-only mode, and existing data never changes.
+- Query data by using a variety of methods without being limited by the pre-aggregation method.
+- Load log data or time-series data. New data is written in append-only mode, and existing data is not updated.
 
 ### Create a table
 
 Suppose that you want to analyze the event data over a specific time range. In this example, create a table named `detail` and define `event_time` and `event_type` as sort key columns.
 
-The statement for creating the table is as follows:
+Statement for creating the table:
 
 ```SQL
 CREATE TABLE IF NOT EXISTS detail (
@@ -83,18 +83,20 @@ DUPLICATE KEY(event_time, event_type)
 DISTRIBUTED BY HASH(user_id) BUCKETS 8;
 ```
 
+> You must specify `DISTRIBUTED BY HASH`. Otherwise, the table creation fails.
+
 ### Usage notes
 
 - Take note of the following points about the sort key of a table:
-  - You can use the `DUPLICATE KEY` keyword to explicitly define the columns that participate in the sort key.
+  - You can use the `DUPLICATE KEY` keyword to explicitly define the columns that are used in the sort key.
 
-    > Note: By default, if you do not define sort key columns, StarRocks selects the first three columns as sort key columns.
+    > Note: By default, if you do not specify sort key columns, StarRocks uses the **first three** columns as sort key columns.
 
-  - In the Duplicate Key model, the sort key can be composed of some or all columns.  
+  - In the Duplicate Key model, the sort key can consist of some or all of the dimension columns.
 
-- You can create indexes such as BITMAP indexes and Bloom Filter indexes at table creation.
+- You can create indexes such as BITMAP indexes and Bloomfilter indexes at table creation.
 
-- If two identical records are loaded, the Duplicate Key model considers the two records as one record instead of two.
+- If two identical records are loaded, the Duplicate Key model retains them as two records, rather than one.
 
 ### What to do next
 
@@ -166,19 +168,22 @@ CREATE TABLE IF NOT EXISTS example_db.aggregate_tbl (
     pv BIGINT SUM DEFAULT "0" COMMENT "total page views"
 
 )
-
-DISTRIBUTED BY HASH(site_id) BUCKETS 8;
+AGGREGATE KEY(site_id, date, city_code)
+DISTRIBUTED BY HASH(site_id) BUCKETS 8
+PROPERTIES (
+"replication_num" = "1"
+);
 ```
 
 ### Usage notes
 
 - Take note of the following points about the sort key of a table:
-  - You can use the `AGGREGATE KEY` keyword to explicitly define the columns that participate in the sort key.
+  - You can use the `AGGREGATE KEY` keyword to explicitly define the columns that are used in the sort key.
 
-    - If the `AGGREGATE KEY` keyword does not include all dimension columns, the table cannot  be created.
+    - If the `AGGREGATE KEY` keyword does not include all the dimension columns, the table cannot be created.
     - By default, if you do not explicitly define sort key columns by using the `AGGREGATE KEY` keyword, StarRocks selects all columns except metric columns as the sort key columns.
 
-  - The sort key must be created on columns on which unique constraints are enforced. It must be composed of all dimension columns whose names cannot be changed.
+  - The sort key must be created on columns on which unique constraints are enforced. It must be composed of all the dimension columns whose names cannot be changed.
 
 - You can specify an aggregate function following the name of a column to define the column as a metric column. In most cases, metric columns hold data that needs to be aggregated and analyzed.
 
@@ -421,7 +426,7 @@ PROPERTIES("replication_num" = "3",
 
       In the preceding formula, `9` is the immutable overhead per row, and `1.5` is the average extra overhead per hash table.
 
-- `enable_persistent_index`: the primary key index can be persisted to disk and stored in memory to avoid it taking up too much memory. Generally, the primary key index can only take up 1/10 of the memory it does before. You can set this property in `PROPERTIES` when you create a table. Valid values are true or false. Default value is true.
+- `enable_persistent_index`: the primary key index can be persisted to disk and stored in memory to avoid it taking up too much memory. Generally, the primary key index can only take up 1/10 of the memory it does before. You can set this property in `PROPERTIES` when you create a table. Valid values are true or false. Default value is false.
 
   > - If you want to modify this parameter after the table is created, please see the part Modify the properties of table in [ALTER TABLE](../sql-reference/sql-statements/data-definition/ALTER%20TABLE.md).
   > - The primary key must be a fixed-length data type (except for CHAR). Variable-length data types (such as VARCHAR) are not supported.
@@ -438,4 +443,4 @@ PROPERTIES("replication_num" = "3",
 
 ### What to do next
 
-You can run a  stream load, broker load, or routine load job to perform insert, update, or delete operations on all or individual columns of a table that uses the Primary Key model. For more information, see [Data load into tables of Primary Key model](../loading/Load_to_Primary_Key_tables.md).
+You can run a  stream load, broker load, or routine load job to perform insert, update, or delete operations on all or individual columns of a table that uses the Primary Key model. For more information, see [Overview of data loading](../loading/Loading_intro.md).

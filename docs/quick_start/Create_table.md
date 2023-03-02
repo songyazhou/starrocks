@@ -13,7 +13,7 @@ After the StarRocks instance is deployed (see [Deploy StarRocks](../quick_start/
 Log in to StarRocks via your MySQL client. You can log in with the default user `root`, and the password is empty by default.
 
 ```Plain
-mysql -h <fe_ip> -P<fe_http_port> -uroot
+mysql -h <fe_ip> -P<fe_query_port> -uroot
 ```
 
 > **NOTE**
@@ -43,6 +43,14 @@ CREATE TABLE IF NOT EXISTS sr_member (
     city_code        INT,
     reg_date         DATE,
     verified         BOOLEAN
+)
+PARTITION BY RANGE(reg_date)
+(
+    PARTITION p1 VALUES [('2022-03-13'), ('2022-03-14')),
+    PARTITION p2 VALUES [('2022-03-14'), ('2022-03-15')),
+    PARTITION p3 VALUES [('2022-03-15'), ('2022-03-16')),
+    PARTITION p4 VALUES [('2022-03-16'), ('2022-03-17')),
+    PARTITION p5 VALUES [('2022-03-17'), ('2022-03-18'))
 )
 DISTRIBUTED BY HASH(city_code)
 PROPERTIES(

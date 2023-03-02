@@ -26,6 +26,7 @@ using DelVectorPtr = std::shared_ptr<DelVector>;
 class MemTracker;
 class SnapshotMeta;
 class Tablet;
+class TabletBasicInfo;
 class TTabletInfo;
 
 namespace vectorized {
@@ -218,6 +219,13 @@ public:
     Status get_rowsets_for_incremental_snapshot(const std::vector<int64_t>& missing_version_ranges,
                                                 std::vector<RowsetSharedPtr>& rowsets);
 
+    void to_rowset_meta_pb(const std::vector<RowsetMetaSharedPtr>& rowset_metas,
+                           std::vector<RowsetMetaPB>& rowset_metas_pb);
+
+    Status check_and_remove_rowset();
+
+    void get_basic_info_extra(TabletBasicInfo& info);
+
 private:
     friend class Tablet;
     friend class PrimaryIndex;
@@ -279,13 +287,6 @@ private:
     Status _commit_compaction(std::unique_ptr<CompactionInfo>* info, const RowsetSharedPtr& rowset,
                               EditVersion* commit_version);
 
-    // Find all but the latest already-applied versions whose creation time is less than or
-    // equal to |expire_time|, then append them into |expire_list| and erase them from the
-    // in-memory version list.
-    void _erase_expired_versions(int64_t expire_time, std::vector<std::unique_ptr<EditVersionInfo>>* expire_list);
-
-    std::set<uint32_t> _active_rowsets();
-
     void _stop_and_wait_apply_done();
 
     Status _do_compaction(std::unique_ptr<CompactionInfo>* pinfo, bool wait_apply);
@@ -309,7 +310,7 @@ private:
     Status _load_from_pb(const TabletUpdatesPB& updates);
 
     // thread-safe
-    void _remove_unused_rowsets();
+    void _remove_unused_rowsets(bool drop_tablet = false);
 
     // REQUIRE: |_lock| is held.
     void _to_updates_pb_unlocked(TabletUpdatesPB* updates_pb) const;

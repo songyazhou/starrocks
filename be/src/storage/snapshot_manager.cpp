@@ -94,7 +94,9 @@ Status SnapshotManager::make_snapshot(const TSnapshotRequest& request, string* s
     int64_t timeout_s = request.__isset.timeout ? request.timeout : config::snapshot_expire_time_sec;
 
     StatusOr<std::string> res;
+    std::shared_lock rdlock(tablet->get_header_lock());
     int64_t cur_tablet_version = tablet->max_version().second;
+    rdlock.unlock();
     if (request.__isset.missing_version) {
         LOG(INFO) << "make incremental snapshot tablet:" << request.tablet_id << " cur_version:" << cur_tablet_version
                   << " req_version:" << JoinInts(request.missing_version, ",") << " timeout:" << timeout_s;
@@ -574,11 +576,7 @@ Status SnapshotManager::make_snapshot_on_tablet_meta(SnapshotTypePB snapshot_typ
     snapshot_meta.set_snapshot_format(snapshot_format);
     snapshot_meta.set_snapshot_type(snapshot_type);
     snapshot_meta.set_snapshot_version(snapshot_version);
-    snapshot_meta.rowset_metas().reserve(rowset_metas.size());
-    for (const auto& rowset_meta : rowset_metas) {
-        RowsetMetaPB& meta_pb = snapshot_meta.rowset_metas().emplace_back();
-        rowset_meta->to_rowset_pb(&meta_pb);
-    }
+    tablet->updates()->to_rowset_meta_pb(rowset_metas, snapshot_meta.rowset_metas());
     if (snapshot_type == SNAPSHOT_TYPE_FULL) {
         auto meta_store = tablet->data_dir()->get_meta();
         uint32_t new_rsid = 0;

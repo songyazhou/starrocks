@@ -1,13 +1,13 @@
 # SHOW PARTITIONS
 
-## description
+## Description
 
 This statement is used to display partition information
 
 Syntax:
 
 ```sql
-SHOW PARTITIONS FROM [db_name.]table_name [WHERE] [ORDER BY] [LIMIT];
+SHOW PARTITIONS FROM [db_name.]table_name [WHERE] [ORDER BY] [LIMIT]
 ```
 
 Note:
@@ -16,7 +16,7 @@ Note:
 Support the filtering of PartitionId,PartitionName,State,Buckets,ReplicationNum,LastConsistencyCheckTime and other columns. This syntax only supports OLAP tables, ES tables and HIVE tables. Please use SHOW PROC '/dbs/db_id/table_id/partitions'SHOW PROC '/dbs/db_id/table_id/partitions'
 ```
 
-## example
+## Examples
 
 1. Display all partition information of the specified table under the specified db
 

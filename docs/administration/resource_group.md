@@ -44,7 +44,7 @@ You can specify CPU and memory resource quotas for a resource group on a BE by u
 
 - `mem_limit`
 
-  This parameter specifies the percentage of memory that can be used for queries in the total memory that is provided by the BE. Unit: %. Valid values: (0, 1).
+  This parameter specifies the percentage of memory that can be used for queries in the total memory that is provided by the BE. Valid values: (0, 1).
 
   > Note: The amount of memory that can be used for queries is indicated by the `query_pool` parameter. For more information about the parameter, see [Memory management](Memory_management.md).
 
@@ -244,7 +244,7 @@ ALTER RESOURCE GROUP <group_name> ADD (user='string', role='string', query_type 
 Execute the following statement to delete a classifier from a resource group:
 
 ```SQL
-ALTER RESOURCE GROUP <group_name> DROP (CLASSIFER_ID_1, CLASSIFIER_ID_2, ...);
+ALTER RESOURCE GROUP <group_name> DROP (CLASSIFIER_ID_1, CLASSIFIER_ID_2, ...);
 ```
 
 Execute the following statement to delete all classifiers of a resource group:

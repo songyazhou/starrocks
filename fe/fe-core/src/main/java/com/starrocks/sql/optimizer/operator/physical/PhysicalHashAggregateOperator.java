@@ -82,6 +82,13 @@ public class PhysicalHashAggregateOperator extends PhysicalOperator {
         return type.isGlobal() && !isSplit;
     }
 
+    /**
+     * Whether it is the first phase in three/four-phase agg whose second phase is pruned.
+     */
+    public boolean isMergedLocalAgg() {
+        return type.isLocal() && !useStreamingPreAgg;
+    }
+
     public List<ColumnRefOperator> getPartitionByColumns() {
         return partitionByColumns;
     }
@@ -116,12 +123,11 @@ public class PhysicalHashAggregateOperator extends PhysicalOperator {
         if (this == o) {
             return true;
         }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
+
         if (!super.equals(o)) {
             return false;
         }
+
         PhysicalHashAggregateOperator that = (PhysicalHashAggregateOperator) o;
         return type == that.type && Objects.equals(aggregations, that.aggregations) &&
                 Objects.equals(groupBys, that.groupBys);

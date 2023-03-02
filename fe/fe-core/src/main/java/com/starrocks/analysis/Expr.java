@@ -902,14 +902,8 @@ abstract public class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
     protected void treeToThriftHelper(TExpr container) {
         TExprNode msg = new TExprNode();
 
-        if (type.isNull()) {
-            // Hack to ensure BE never sees TYPE_NULL. If an expr makes it this far without
-            // being cast to a non-NULL type, the type doesn't matter and we can cast it
-            // arbitrarily.
-            NullLiteral l = NullLiteral.create(ScalarType.BOOLEAN);
-            l.treeToThriftHelper(container);
-            return;
-        }
+        Preconditions.checkState(!type.isNull(), "NULL_TYPE is illegal in thrift stage");
+        Preconditions.checkState(!Objects.equal(Type.ARRAY_NULL, type), "Array<NULL_TYPE> is illegal in thrift stage");
 
         msg.type = type.toThrift();
         msg.num_children = children.size();
@@ -924,6 +918,7 @@ abstract public class Expr extends TreeNode<Expr> implements ParseNode, Cloneabl
         msg.output_scale = getOutputScale();
         msg.setIs_monotonic(isMonotonic());
         toThrift(msg);
+        // Echoes the above hack process
         container.addToNodes(msg);
         for (Expr child : children) {
             child.treeToThriftHelper(container);

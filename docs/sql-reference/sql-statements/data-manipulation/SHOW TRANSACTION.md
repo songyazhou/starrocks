@@ -1,6 +1,6 @@
 # SHOW TRANSACTION
 
-## description
+## Description
 
 This syntax is used to view the transaction details of the specified transaction id.
 
@@ -8,8 +8,8 @@ Syntax:
 
 ```sql
 SHOW TRANSACTION
-[FROM db_name]
-WHERE id = transaction_id;
+[FROM <db_name>]
+WHERE id = transaction_id
 ```
 
 Examples of returned results:
@@ -46,7 +46,7 @@ TimeoutMs: 300000
 * ListenerId: id of the related import job
 * TimeoutMs: transaction timeout, in milliseconds
 
-## example
+## Examples
 
 1. To view a transaction with id 4005:
 

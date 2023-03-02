@@ -21,7 +21,6 @@ import com.starrocks.sql.optimizer.rule.RuleSetType;
 import com.starrocks.sql.optimizer.rule.implementation.PreAggregateTurnOnRule;
 import com.starrocks.sql.optimizer.rule.join.ReorderJoinRule;
 import com.starrocks.sql.optimizer.rule.mv.MaterializedViewRule;
-import com.starrocks.sql.optimizer.rule.transformation.LimitPruneTabletsRule;
 import com.starrocks.sql.optimizer.rule.transformation.MergeProjectWithChildRule;
 import com.starrocks.sql.optimizer.rule.transformation.MergeTwoAggRule;
 import com.starrocks.sql.optimizer.rule.transformation.MergeTwoProjectRule;
@@ -38,6 +37,7 @@ import com.starrocks.sql.optimizer.task.OptimizeGroupTask;
 import com.starrocks.sql.optimizer.task.TaskContext;
 import com.starrocks.sql.optimizer.task.TopDownRewriteIterativeTask;
 import com.starrocks.sql.optimizer.task.TopDownRewriteOnceTask;
+import com.starrocks.sql.optimizer.validate.OptExpressionValidator;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -85,7 +85,7 @@ public class Optimizer {
         // Note: root group of memo maybe change after rewrite,
         // so we should always get root group and root group expression
         // directly from memo.
-        logicalRuleRewrite(memo, rootTaskContext);
+        rewriteAndValidatePlan(memo, rootTaskContext);
         OptimizerTraceUtil.log(connectContext, "after logical rewrite, root group:\n%s", memo.getRootGroup());
 
         // collect all olap scan operator
@@ -265,7 +265,6 @@ public class Optimizer {
         CTEUtils.collectCteOperatorsWithoutCosts(memo, context);
 
         ruleRewriteOnlyOnce(memo, rootTaskContext, RuleSetType.PARTITION_PRUNE);
-        ruleRewriteOnlyOnce(memo, rootTaskContext, LimitPruneTabletsRule.getInstance());
         ruleRewriteIterative(memo, rootTaskContext, RuleSetType.PRUNE_PROJECT);
 
         cleanUpMemoGroup(memo);
@@ -287,6 +286,12 @@ public class Optimizer {
         ruleRewriteOnlyOnce(memo, rootTaskContext, new ReorderIntersectRule());
 
         cleanUpMemoGroup(memo);
+    }
+
+    private void rewriteAndValidatePlan(Memo memo, TaskContext rootTaskContext) {
+        logicalRuleRewrite(memo, rootTaskContext);
+        OptExpressionValidator validator = new OptExpressionValidator();
+        validator.visit(memo.getRootGroup().extractLogicalTree(), null);
     }
 
     private void cleanUpMemoGroup(Memo memo) {

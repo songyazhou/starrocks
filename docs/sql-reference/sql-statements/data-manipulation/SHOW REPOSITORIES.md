@@ -1,13 +1,13 @@
 # SHOW REPOSITORIES
 
-## description
+## Description
 
 This statement is used to view the currently created repositories.
 
 Syntax:
 
-```sql
-SHOW REPOSITORIES;
+```SQL
+SHOW REPOSITORIES
 ```
 
 ```plain text
@@ -22,7 +22,7 @@ Broker：     the dependent Broker
 ErrMsg：     StarRocks will regularly check the connectivity of the repository. If there is a problem, an error message will be displayed here
 ```
 
-## example
+## Examples
 
 1. View created repositories：
 
